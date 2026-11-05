@@ -221,6 +221,53 @@ html, body {
   font-weight: 500;
 }
 
+/* Google Maps Floating My Location FAB */
+.fab-location {
+  position: absolute;
+  bottom: 24px;
+  right: 16px;
+  z-index: 250;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.12);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.22);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.fab-location:hover, .fab-location:active {
+  background: #F1F3F4;
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.28);
+}
+.fab-location.locating {
+  color: var(--green);
+  animation: livePulse 1.2s infinite;
+}
+
+/* Google Maps Alternative Route Comparison Tooltip */
+.route-diff-tooltip {
+  background: #ffffff !important;
+  color: #202124 !important;
+  border: 1px solid rgba(0,0,0,0.18) !important;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.2) !important;
+  border-radius: var(--radius-pill) !important;
+  font-family: var(--font) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  padding: 4px 10px !important;
+  cursor: pointer !important;
+}
+.route-diff-tooltip:hover {
+  background: #e8f0fe !important;
+  color: #1a73e8 !important;
+}
+
 /* Map legend */
 .map-legend {
   position: absolute;

@@ -1,6 +1,6 @@
 /* =====================================================
-   Smart Traffic — Full App Logic (Real-Time Edition)
-   WebSocket Push · Live Browser GPS · OSM Geocoding · AI Insights
+   Smart Traffic — Full Real-Time Navigation Platform
+   Google Maps Standard · Real Road Curves · Traffic Colors · Turn-by-Turn
    ===================================================== */
 
 'use strict';
@@ -11,21 +11,24 @@
 const state = {
   map: null,
   segmentLayers: {},
-  routeLayer: null,
+  routeLayers: [],          // array of polylines for traffic segments
+  altRouteLayers: [],       // alternative route layers
   markerOrigin: null,
   markerDest: null,
   userMarker: null,
   userAccuracyCircle: null,
-  origin: null,         // { name, lat, lon, isGps }
-  dest: null,           // { name, lat, lon }
+  origin: null,             // { name, lat, lon, isGps, accuracy }
+  dest: null,               // { name, lat, lon }
   vehicle: 'car',
   currentSessionToken: null,
   activeRoute: null,
+  allRoutes: [],
   currentSpeedKph: 0,
   watchId: null,
   tripSimTimer: null,
   tripStartTime: null,
-  tripRouteIndex: 0,
+  tripStepIndex: 0,
+  tripCoordIndex: 0,
   searchDebounce: null,
   ws: null,
   wsRetryTimer: null,
@@ -33,24 +36,40 @@ const state = {
   cachedSegments: [],
 };
 
-// Quick-access known places in Bengaluru pilot corridor
-const QUICK_PLACES = [
-  { name: '📍 My Current Location', isCurrentLoc: true, icon: '📍' },
-  { name: 'CMH Road Junction', lat: 12.9784, lon: 77.6408, icon: '📍' },
-  { name: 'Domlur Flyover', lat: 12.9610, lon: 77.6385, icon: '🌉' },
-  { name: 'Sony World Junction', lat: 12.9352, lon: 77.6245, icon: '📍' },
-  { name: '100 Feet Road', lat: 12.9750, lon: 77.6407, icon: '🛣️' },
-  { name: 'Embassy Golf Links (EGL)', lat: 12.9515, lon: 77.6360, icon: '🏢' },
-  { name: 'Old Airport Road', lat: 12.9635, lon: 77.6465, icon: '🛣️' },
-  { name: 'Suranjan Das Road', lat: 12.9690, lon: 77.6580, icon: '🛣️' },
+// Rich presets for Bengaluru and India
+const POPULAR_HUBS = [
+  { name: '📍 My Current Location (GPS)', isCurrentLoc: true, type: 'place', display: 'Use device GPS sensor or network location' },
+  { name: 'Indiranagar 100 Feet Road', lat: 12.9750, lon: 77.6407, type: 'road', display: '100 Feet Road, Indiranagar, Bengaluru, Karnataka' },
+  { name: 'Domlur Flyover', lat: 12.9610, lon: 77.6385, type: 'landmark', display: 'Domlur Flyover, Old Airport Road, Bengaluru' },
+  { name: 'Sony World Junction', lat: 12.9352, lon: 77.6245, type: 'junction', display: 'Sony World, 80ft Road, Koramangala, Bengaluru' },
+  { name: 'Kempegowda International Airport (BLR)', lat: 13.1986, lon: 77.7066, type: 'transit', display: 'BLR Airport, Devanahalli, Bengaluru, Karnataka' },
+  { name: 'Whitefield ITPL', lat: 12.9863, lon: 77.7381, type: 'area', display: 'International Tech Park, Whitefield, Bengaluru' },
+  { name: 'MG Road Metro Station', lat: 12.9756, lon: 77.6066, type: 'transit', display: 'Mahatma Gandhi Road, Bengaluru Central' },
+  { name: 'Solapur', lat: 17.6599, lon: 75.9064, type: 'place', display: 'Solapur, Maharashtra, India' },
+  { name: 'Mysuru (Mysore)', lat: 12.2958, lon: 76.6394, type: 'place', display: 'Mysuru, Karnataka, India' },
 ];
 
 const TYPE_ICONS = {
-  junction: '🔀', road: '🛣️', landmark: '🌉', area: '📍', transit: '🚉', place: '📍'
+  junction: '🔀', road: '🛣️', landmark: '🌉', area: '📍', transit: '🚉', place: '🏙️', city: '🏙️'
+};
+
+const MANEUVER_ICONS = {
+  left: '↰',
+  right: '↱',
+  'slight left': '↖',
+  'slight right': '↗',
+  'sharp left': '⬅',
+  'sharp right': '➡',
+  straight: '⬆',
+  uturn: '↩',
+  roundabout: '🔄',
+  depart: '🚀',
+  arrive: '🏁',
+  continue: '⬆',
 };
 
 // ──────────────────────────────────────────────
-//  Boot
+//  BOOT
 // ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
@@ -60,19 +79,53 @@ document.addEventListener('DOMContentLoaded', () => {
   initDrawer();
   initSimulationButtons();
   initQuickChips();
-  initMyLocationButton();
+  initLocationButtons();
 
   // Connect real-time WebSocket stream (primary data channel)
   connectWebSocket();
 
-  // Initial fallback fetch (in case WS handshake is pending)
+  // Initial HTTP snapshot
   loadSegmentsHttp();
   pollTrafficSummary();
 
-  // Safety privacy guarantees: cease tracking if user leaves or backgrounds page
+  // Foreground privacy safeguard
   window.addEventListener('beforeunload', handlePageUnload);
   document.addEventListener('visibilitychange', handleVisibilityChange);
 });
+
+// ──────────────────────────────────────────────
+//  MAP INITIALIZATION
+// ──────────────────────────────────────────────
+function initMap() {
+  state.map = L.map('map', {
+    zoomControl: false,
+    attributionControl: true
+  }).setView([12.9610, 77.6385], 13);
+
+  // High-contrast clean map tiles
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(state.map);
+
+  L.control.zoom({ position: 'topright' }).addTo(state.map);
+
+  // Map Legend
+  const legend = L.control({ position: 'bottomright' });
+  legend.onAdd = () => {
+    const div = L.DomUtil.create('div', 'map-legend');
+    div.innerHTML = `
+      <div class="legend-row"><div class="legend-dot" style="background:#1e8e3e"></div>Fast Flow</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#f9ab00"></div>Slowdown</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#d93025"></div>Heavy Traffic</div>
+      <div class="legend-row"><div class="legend-dot" style="background:#7c4dff;border-top:2px dashed #7c4dff;height:0;width:16px"></div>Residential</div>`;
+    return div;
+  };
+  legend.addTo(state.map);
+
+  // Click on map to set points
+  state.map.on('click', handleMapClick);
+}
 
 // ──────────────────────────────────────────────
 //  WEBSOCKET REAL-TIME CLIENT
@@ -92,9 +145,9 @@ function connectWebSocket() {
 
     state.ws.onopen = () => {
       setLivePillStatus('connected', 'LIVE');
-      showToast('⚡ Live Traffic Feed Connected', 'success');
+      showToast('⚡ Real-time Traffic Feed Connected', 'success');
 
-      // Start keep-alive ping every 10 seconds
+      // Keepalive ping every 10s
       if (state.wsPingTimer) clearInterval(state.wsPingTimer);
       state.wsPingTimer = setInterval(() => {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
@@ -109,7 +162,7 @@ function connectWebSocket() {
         if (msg.type === 'traffic_update') {
           handleLiveTrafficUpdate(msg);
         } else if (msg.type === 'incident') {
-          showToast(`⚠️ Live incident reported: ${msg.incident_type}`, 'warning');
+          showToast(`⚠️ Live incident: ${msg.incident_type}`, 'warning');
         }
       } catch (err) {
         console.warn('WS message parse error:', err);
@@ -144,7 +197,6 @@ function setLivePillStatus(status, text) {
   const pill = document.getElementById('livePill');
   const txt = document.getElementById('liveText');
   if (!pill) return;
-
   pill.className = `live-pill ${status}`;
   if (txt) txt.textContent = text;
 }
@@ -154,40 +206,31 @@ function handleLiveTrafficUpdate(data) {
   const prevSegments = state.cachedSegments;
   state.cachedSegments = segments;
 
-  // Render on map
   renderSegments(segments);
 
-  // Update summary badge
   if (data.summary) {
     updateTrafficSummaryBadge(data.summary);
   }
 
-  // Update side drawer
   updateStatusGrid(segments);
 
-  // Detect route congestion changes if user has an active route
-  checkActiveRouteCongestion(segments, prevSegments);
-}
-
-function checkActiveRouteCongestion(newSegments, prevSegments) {
-  if (!state.activeRoute || !state.activeRoute.segments) return;
-
-  const currentRouteSegIds = new Set(state.activeRoute.segments);
-  let newlyCongested = false;
-
-  newSegments.forEach(seg => {
-    if (currentRouteSegIds.has(seg.segment_id)) {
-      const prev = prevSegments.find(p => p.segment_id === seg.segment_id);
-      if (prev && prev.status === 'normal' && (seg.status === 'congested' || seg.status === 'slowing')) {
-        newlyCongested = true;
+  // Check if active route congestion changed
+  if (state.activeRoute && state.activeRoute.segments) {
+    const curSegs = new Set(state.activeRoute.segments);
+    let newlyCongested = false;
+    segments.forEach(seg => {
+      if (curSegs.has(seg.segment_id)) {
+        const prev = prevSegments.find(p => p.segment_id === seg.segment_id);
+        if (prev && prev.status === 'normal' && (seg.status === 'congested' || seg.status === 'slowing')) {
+          newlyCongested = true;
+        }
       }
-    }
-  });
+    });
 
-  if (newlyCongested) {
-    showToast('⚠️ Traffic changed on your route! Recalculating best options…', 'warning');
-    // Silently refresh route alternatives with updated weights
-    doFindRoutes(true);
+    if (newlyCongested) {
+      showToast('⚠️ Traffic changed on your route. Recalculating…', 'warning');
+      doFindRoutes(true);
+    }
   }
 }
 
@@ -201,42 +244,259 @@ function updateTrafficSummaryBadge(summary) {
 }
 
 // ──────────────────────────────────────────────
-//  MAP INITIALIZATION & CONTROLS
+//  HIGH-PRECISION GPS GEOLOCATION
 // ──────────────────────────────────────────────
-function initMap() {
-  state.map = L.map('map', { zoomControl: false, attributionControl: true }).setView([12.9610, 77.6385], 14);
+function initLocationButtons() {
+  const btnSearchGps = document.getElementById('btnMyLocation');
+  const fabGps = document.getElementById('fabMyLocation');
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(state.map);
-
-  L.control.zoom({ position: 'topright' }).addTo(state.map);
-
-  // Map Legend
-  const legend = L.control({ position: 'bottomright' });
-  legend.onAdd = () => {
-    const div = L.DomUtil.create('div', 'map-legend');
-    div.innerHTML = `
-      <div class="legend-row"><div class="legend-dot" style="background:#1e8e3e"></div>Normal</div>
-      <div class="legend-row"><div class="legend-dot" style="background:#f9ab00"></div>Slowing</div>
-      <div class="legend-row"><div class="legend-dot" style="background:#d93025"></div>Congested</div>
-      <div class="legend-row"><div class="legend-dot" style="background:#7c4dff;border-top:2px dashed #7c4dff;height:0;width:16px"></div>Residential</div>`;
-    return div;
-  };
-  legend.addTo(state.map);
-
-  // Map Click Listener — Tap any point on the map to set Origin / Destination
-  state.map.on('click', handleMapClick);
+  if (btnSearchGps) {
+    btnSearchGps.addEventListener('click', () => acquireUserLocation(true));
+  }
+  if (fabGps) {
+    fabGps.addEventListener('click', () => acquireUserLocation(true));
+  }
 }
 
-// Global functions for map popup buttons
+async function acquireUserLocation(centerMap = true) {
+  const fab = document.getElementById('fabMyLocation');
+  if (fab) fab.classList.add('locating');
+
+  showToast('📡 Acquiring high-precision GPS coordinates…', 'info');
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => handleGpsSuccess(pos, centerMap),
+      (err) => {
+        console.warn('Browser GPS failed, falling back to IP geolocation:', err);
+        fallbackIpLocation(centerMap);
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  } else {
+    fallbackIpLocation(centerMap);
+  }
+}
+
+async function fallbackIpLocation(centerMap) {
+  try {
+    const res = await fetch('https://ipapi.co/json/');
+    const data = await res.json();
+    if (data.latitude && data.longitude) {
+      handleCoordinatesAcquired(data.latitude, data.longitude, 500, `${data.city || 'Your Area'}, ${data.region || ''}`, centerMap);
+      showToast(`📍 Located via Network: ${data.city || 'Your Location'}`, 'info');
+      return;
+    }
+  } catch (e) {}
+
+  // Default to Bengaluru center if all location lookups blocked
+  handleCoordinatesAcquired(12.9716, 77.5946, 50, 'Bengaluru, Karnataka', centerMap);
+  showToast('📍 Set to Bengaluru. Drag the green marker or tap the map to fine-tune.', 'warning');
+}
+
+async function handleGpsSuccess(pos, centerMap) {
+  const lat = pos.coords.latitude;
+  const lon = pos.coords.longitude;
+  const acc = Math.round(pos.coords.accuracy || 15);
+
+  let address = `Current Location (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+  try {
+    const res = await fetch(`/v1/ai/places/reverse?lat=${lat.toFixed(5)}&lon=${lon.toFixed(5)}`);
+    const data = await res.json();
+    if (data.name) address = data.name;
+  } catch (e) {}
+
+  handleCoordinatesAcquired(lat, lon, acc, address, centerMap);
+  showToast(`📍 GPS Located: ${address} (±${acc}m)`, 'success');
+}
+
+function handleCoordinatesAcquired(lat, lon, accuracy, addressName, centerMap) {
+  const fab = document.getElementById('fabMyLocation');
+  if (fab) fab.classList.remove('locating');
+
+  state.origin = {
+    name: addressName,
+    lat: lat,
+    lon: lon,
+    isGps: true,
+    accuracy: accuracy
+  };
+
+  const originInput = document.getElementById('originInput');
+  if (originInput) originInput.value = addressName;
+  const clearBtn = document.getElementById('originClear');
+  if (clearBtn) clearBtn.style.display = '';
+
+  setMarker('origin', lat, lon, `📍 ${addressName} (Drag to adjust)`, true);
+
+  if (centerMap && state.map) {
+    state.map.flyTo([lat, lon], 15);
+  }
+
+  if (state.dest) {
+    fitBothMarkers();
+    setTimeout(() => doFindRoutes(false), 350);
+  }
+}
+
+// ──────────────────────────────────────────────
+//  SEARCH FIELDS & REAL-TIME AUTOCOMPLETE
+// ──────────────────────────────────────────────
+function initSearchFields() {
+  setupSearchField('originInput', 'originDropdown', 'originClear', (place) => {
+    state.origin = place;
+    setMarker('origin', place.lat, place.lon, place.name, true);
+    if (state.dest) fitBothMarkers();
+    tryAutoSearch();
+  });
+
+  setupSearchField('destInput', 'destDropdown', 'destClear', (place) => {
+    state.dest = place;
+    setMarker('dest', place.lat, place.lon, place.name, false);
+    if (state.origin) fitBothMarkers();
+    tryAutoSearch();
+  });
+
+  // Swap button
+  document.getElementById('swapBtn')?.addEventListener('click', () => {
+    const o = state.origin, d = state.dest;
+    if (!o && !d) return;
+    state.origin = d; state.dest = o;
+    document.getElementById('originInput').value = d ? d.name : '';
+    document.getElementById('destInput').value = o ? o.name : '';
+    document.getElementById('originClear').style.display = d ? '' : 'none';
+    document.getElementById('destClear').style.display = o ? '' : 'none';
+    if (state.origin) setMarker('origin', state.origin.lat, state.origin.lon, state.origin.name, true);
+    if (state.dest) setMarker('dest', state.dest.lat, state.dest.lon, state.dest.name, false);
+    if (state.origin && state.dest) fitBothMarkers();
+  });
+
+  // Find Routes
+  document.getElementById('btnFindRoutes')?.addEventListener('click', () => doFindRoutes(false));
+  document.getElementById('btnBack')?.addEventListener('click', () => showPanel('panelSearch'));
+  document.getElementById('btnStartTrip')?.addEventListener('click', doStartTrip);
+  document.getElementById('btnEndTrip')?.addEventListener('click', doEndTrip);
+
+  // Incident Modal
+  document.getElementById('btnReportIssue')?.addEventListener('click', () => {
+    document.getElementById('reportModal')?.classList.remove('hidden');
+  });
+  document.getElementById('cancelReport')?.addEventListener('click', () => {
+    document.getElementById('reportModal')?.classList.add('hidden');
+  });
+  document.querySelectorAll('.incident-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      submitIncident(btn.dataset.type);
+      document.getElementById('reportModal')?.classList.add('hidden');
+    });
+  });
+}
+
+function setupSearchField(inputId, dropdownId, clearId, onSelect) {
+  const input = document.getElementById(inputId);
+  const dropdown = document.getElementById(dropdownId);
+  const clearBtn = document.getElementById(clearId);
+  if (!input || !dropdown) return;
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (clearBtn) clearBtn.style.display = q ? '' : 'none';
+    clearTimeout(state.searchDebounce);
+    state.searchDebounce = setTimeout(() => searchPlaces(q, dropdown, input, onSelect), 250);
+  });
+
+  input.addEventListener('focus', () => {
+    const q = input.value.trim();
+    searchPlaces(q, dropdown, input, onSelect);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.classList.remove('open');
+    }
+  });
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      clearBtn.style.display = 'none';
+      dropdown.classList.remove('open');
+      if (inputId === 'originInput') {
+        state.origin = null;
+        if (state.markerOrigin) { state.map.removeLayer(state.markerOrigin); state.markerOrigin = null; }
+      } else {
+        state.dest = null;
+        if (state.markerDest) { state.map.removeLayer(state.markerDest); state.markerDest = null; }
+      }
+      clearRouteLayers();
+    });
+  }
+}
+
+async function searchPlaces(q, dropdown, input, onSelect) {
+  if (!q || q.length < 2) {
+    renderDropdown(POPULAR_HUBS, dropdown, input, onSelect);
+    return;
+  }
+
+  try {
+    const res = await fetch(`/v1/ai/places/search?q=${encodeURIComponent(q)}`);
+    const places = await res.json();
+    renderDropdown(places, dropdown, input, onSelect);
+  } catch (err) {
+    const filtered = POPULAR_HUBS.filter(p => p.name.toLowerCase().includes(q.toLowerCase()));
+    renderDropdown(filtered, dropdown, input, onSelect);
+  }
+}
+
+function renderDropdown(places, dropdown, input, onSelect) {
+  if (!places || !places.length) {
+    dropdown.classList.remove('open');
+    return;
+  }
+
+  dropdown.innerHTML = places.map((p, i) => `
+    <div class="dropdown-item" data-idx="${i}">
+      <span class="dropdown-item-icon">${p.isCurrentLoc ? '📍' : (TYPE_ICONS[p.type] || '📍')}</span>
+      <div class="dropdown-item-text">
+        <div class="dropdown-item-name">${p.name}</div>
+        <div class="dropdown-item-type">${p.display || p.type}</div>
+      </div>
+    </div>
+  `).join('');
+  dropdown.classList.add('open');
+
+  dropdown.querySelectorAll('.dropdown-item').forEach((el, i) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const place = places[i];
+      if (place.isCurrentLoc) {
+        dropdown.classList.remove('open');
+        acquireUserLocation(true);
+        return;
+      }
+      input.value = place.name;
+      dropdown.classList.remove('open');
+      onSelect(place);
+    });
+  });
+}
+
+function tryAutoSearch() {
+  if (state.origin && state.dest) {
+    setTimeout(() => doFindRoutes(false), 350);
+  }
+}
+
+// ──────────────────────────────────────────────
+//  MAP CLICK TO SET LOCATION
+// ──────────────────────────────────────────────
 window.setAsOrigin = function(lat, lon, name) {
   state.map.closePopup();
   state.origin = { name, lat, lon };
   document.getElementById('originInput').value = name;
   document.getElementById('originClear').style.display = '';
-  setMarker('origin', lat, lon, name);
+  setMarker('origin', lat, lon, name, true);
   if (state.dest) fitBothMarkers();
   tryAutoSearch();
 };
@@ -246,22 +506,20 @@ window.setAsDest = function(lat, lon, name) {
   state.dest = { name, lat, lon };
   document.getElementById('destInput').value = name;
   document.getElementById('destClear').style.display = '';
-  setMarker('dest', lat, lon, name);
+  setMarker('dest', lat, lon, name, false);
   if (state.origin) fitBothMarkers();
   tryAutoSearch();
 };
 
 async function handleMapClick(e) {
-  // If active trip is running, do not open selection popups
   if (state.currentSessionToken) return;
 
   const lat = e.latlng.lat;
   const lon = e.latlng.lng;
 
-  // Temporary popup while reverse geocoding
   const popup = L.popup()
     .setLatLng([lat, lon])
-    .setContent('<div style="font-size:12px;color:#5f6368;padding:4px">Identifying location…</div>')
+    .setContent('<div style="font-size:12px;color:#5f6368;padding:4px">Identifying street address…</div>')
     .openOn(state.map);
 
   try {
@@ -271,7 +529,7 @@ async function handleMapClick(e) {
     const safeName = placeName.replace(/'/g, "\\'");
 
     popup.setContent(`
-      <div style="font-family:Inter,sans-serif;min-width:180px;padding:2px 0;">
+      <div style="font-family:Inter,sans-serif;min-width:190px;padding:2px 0;">
         <div style="font-weight:700;font-size:13px;color:#202124;margin-bottom:8px;">📍 ${placeName}</div>
         <div style="display:flex;gap:6px;">
           <button onclick="window.setAsOrigin(${lat}, ${lon}, '${safeName}')"
@@ -301,326 +559,72 @@ async function handleMapClick(e) {
 }
 
 // ──────────────────────────────────────────────
-//  TRAFFIC SEGMENT RENDERING
+//  MARKERS (DRAGGABLE & GOOGLE MAPS STYLE)
 // ──────────────────────────────────────────────
-function getSegmentStyle(seg) {
-  if (seg.status === 'closed') return { color: '#5f6368', weight: 5, dashArray: '8 6' };
-  if (seg.status === 'congested') return { color: '#d93025', weight: 6 };
-  if (seg.status === 'slowing') return { color: '#f9ab00', weight: 5 };
-  if (seg.road_class === 'residential') return { color: '#7c4dff', weight: 4, dashArray: '5 5', opacity: 0.7 };
-  return { color: '#1e8e3e', weight: 5 };
-}
+function makePinIcon(type) {
+  const isOrigin = type === 'origin';
+  const color = isOrigin ? '#1E8E3E' : '#D93025';
+  const label = isOrigin ? 'A' : 'B';
 
-function renderSegments(segs) {
-  // Update or create polylines
-  segs.forEach(seg => {
-    const style = { ...getSegmentStyle(seg), opacity: 0.9 };
-    const speed = seg.current_speed_kph ?? seg.baseline_speed_kph;
-    const pctBaseline = Math.round((speed / seg.baseline_speed_kph) * 100);
-
-    const popupHtml = `
-      <div style="font-family:Inter,sans-serif;min-width:190px;font-size:12px;">
-        <div style="font-weight:700;font-size:13px;color:#202124;margin-bottom:6px;">${seg.name}</div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="color:#5f6368">Status</span>
-          <span style="font-weight:700;color:${style.color}">${seg.status.toUpperCase()}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="color:#5f6368">Speed</span>
-          <span style="font-weight:600">${speed} km/h <span style="color:#9aa0a6">(${pctBaseline}%)</span></span>
-        </div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="color:#5f6368">Live Evidence</span>
-          <span style="font-weight:600">${seg.sample_count} devices (${seg.confidence})</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;">
-          <span style="color:#5f6368">Detour quota</span>
-          <span style="font-weight:600">${seg.current_diversion_count}/${seg.diversion_cap}</span>
-        </div>
-        <div style="margin-top:8px;background:#f1f3f4;border-radius:4px;padding:5px 8px;font-size:11px;color:#5f6368">
-          Width: ${seg.width_m}m · ${seg.road_class} · ${seg.is_oneway ? 'One-way' : 'Two-way'}
-        </div>
-      </div>
-    `;
-
-    if (state.segmentLayers[seg.segment_id]) {
-      // Existing layer: update style & popup dynamically
-      const poly = state.segmentLayers[seg.segment_id];
-      poly.setStyle(style);
-      poly.setPopupContent(popupHtml);
-    } else {
-      // New layer
-      const poly = L.polyline(seg.coordinates, style).addTo(state.map);
-      poly.bindPopup(popupHtml, { maxWidth: 220 });
-      state.segmentLayers[seg.segment_id] = poly;
-    }
-  });
-}
-
-async function loadSegmentsHttp() {
-  try {
-    const res = await fetch('/v1/traffic/segments');
-    const segs = await res.json();
-    state.cachedSegments = segs;
-    renderSegments(segs);
-    updateStatusGrid(segs);
-  } catch (err) {
-    console.warn('HTTP segment load failed:', err);
-  }
-}
-
-function updateStatusGrid(segs) {
-  const grid = document.getElementById('statusGrid');
-  if (!grid) return;
-  grid.innerHTML = segs.slice(0, 8).map(seg => {
-    const color = seg.status === 'congested' ? '#d93025' : seg.status === 'slowing' ? '#f9ab00' : '#1e8e3e';
-    const speed = Math.round(seg.current_speed_kph ?? seg.baseline_speed_kph);
-    return `
-      <div class="status-item">
-        <div class="status-item-dot" style="background:${color}"></div>
-        <span class="status-item-name">${seg.name.split('(')[0].trim()}</span>
-        <span class="status-item-speed">${speed} km/h</span>
-      </div>`;
-  }).join('');
-}
-
-async function pollTrafficSummary() {
-  try {
-    const res = await fetch('/v1/ai/traffic-summary');
-    const data = await res.json();
-    updateTrafficSummaryBadge({
-      level: data.overall_level,
-      color: data.color,
-      emoji: data.emoji
-    });
-  } catch (err) {}
-}
-
-// ──────────────────────────────────────────────
-//  BROWSER GEOLOCATION (Real GPS)
-// ──────────────────────────────────────────────
-function initMyLocationButton() {
-  const btn = document.getElementById('btnMyLocation');
-  if (btn) {
-    btn.addEventListener('click', () => useCurrentLocation(true));
-  }
-}
-
-async function useCurrentLocation(forceFlyTo = false) {
-  if (!navigator.geolocation) {
-    showToast('Geolocation is not supported by your browser', 'error');
-    return;
-  }
-
-  showToast('📡 Acquiring real GPS coordinates…', 'info');
-
-  navigator.geolocation.getCurrentPosition(
-    async (position) => {
-      const lat = position.coords.latitude;
-      const lon = position.coords.longitude;
-      const accuracy = Math.round(position.coords.accuracy || 10);
-
-      try {
-        // Reverse geocode to get real human-readable street/area name
-        const res = await fetch(`/v1/ai/places/reverse?lat=${lat}&lon=${lon}`);
-        const data = await res.json();
-        const address = data.name || 'My Current Location';
-
-        state.origin = { name: address, lat, lon, isGps: true, accuracy };
-        document.getElementById('originInput').value = address;
-        document.getElementById('originClear').style.display = '';
-
-        setMarker('origin', lat, lon, `📍 Your Location (±${accuracy}m)`);
-
-        if (forceFlyTo) {
-          state.map.flyTo([lat, lon], 15);
-        }
-
-        showToast(`📍 Located: ${address}`, 'success');
-
-        if (state.dest) {
-          fitBothMarkers();
-          setTimeout(doFindRoutes, 400);
-        }
-      } catch (err) {
-        state.origin = { name: 'My Current Location', lat, lon, isGps: true };
-        document.getElementById('originInput').value = 'My Current Location';
-        document.getElementById('originClear').style.display = '';
-        setMarker('origin', lat, lon, 'My Current Location');
-        if (forceFlyTo) state.map.flyTo([lat, lon], 15);
-      }
-    },
-    (err) => {
-      console.warn('Geolocation error:', err);
-      // Helpful fallback notification
-      showToast('⚠️ GPS permission denied or unavailable. You can tap any point on the map to set your location.', 'warning');
-    },
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
-  );
-}
-
-// ──────────────────────────────────────────────
-//  CUSTOM PLACE SEARCH (Nominatim Geocoding)
-// ──────────────────────────────────────────────
-function initSearchFields() {
-  setupSearchField('originInput', 'originDropdown', 'originClear', (place) => {
-    state.origin = place;
-    setMarker('origin', place.lat, place.lon, place.name);
-    if (state.dest) fitBothMarkers();
-    tryAutoSearch();
-  });
-
-  setupSearchField('destInput', 'destDropdown', 'destClear', (place) => {
-    state.dest = place;
-    setMarker('dest', place.lat, place.lon, place.name);
-    if (state.origin) fitBothMarkers();
-    tryAutoSearch();
-  });
-
-  // Swap button
-  document.getElementById('swapBtn').addEventListener('click', () => {
-    const o = state.origin, d = state.dest;
-    if (!o && !d) return;
-    state.origin = d; state.dest = o;
-    document.getElementById('originInput').value = d ? d.name : '';
-    document.getElementById('destInput').value = o ? o.name : '';
-    document.getElementById('originClear').style.display = d ? '' : 'none';
-    document.getElementById('destClear').style.display = o ? '' : 'none';
-    if (state.origin) setMarker('origin', state.origin.lat, state.origin.lon, state.origin.name);
-    if (state.dest) setMarker('dest', state.dest.lat, state.dest.lon, state.dest.name);
-    if (state.origin && state.dest) fitBothMarkers();
-  });
-
-  // Find Routes button
-  document.getElementById('btnFindRoutes').addEventListener('click', () => doFindRoutes(false));
-
-  // Back button
-  document.getElementById('btnBack').addEventListener('click', () => showPanel('panelSearch'));
-
-  // Start trip button
-  document.getElementById('btnStartTrip').addEventListener('click', doStartTrip);
-
-  // End trip button
-  document.getElementById('btnEndTrip').addEventListener('click', doEndTrip);
-
-  // Incident reporting modal
-  document.getElementById('btnReportIssue').addEventListener('click', () => {
-    document.getElementById('reportModal').classList.remove('hidden');
-  });
-  document.getElementById('cancelReport').addEventListener('click', () => {
-    document.getElementById('reportModal').classList.add('hidden');
-  });
-  document.querySelectorAll('.incident-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      submitIncident(btn.dataset.type);
-      document.getElementById('reportModal').classList.add('hidden');
-    });
-  });
-}
-
-function setupSearchField(inputId, dropdownId, clearId, onSelect) {
-  const input = document.getElementById(inputId);
-  const dropdown = document.getElementById(dropdownId);
-  const clearBtn = document.getElementById(clearId);
-
-  input.addEventListener('input', () => {
-    const q = input.value.trim();
-    clearBtn.style.display = q ? '' : 'none';
-    clearTimeout(state.searchDebounce);
-    state.searchDebounce = setTimeout(() => searchPlaces(q, dropdown, input, onSelect), 280);
-  });
-
-  input.addEventListener('focus', () => {
-    const q = input.value.trim();
-    searchPlaces(q, dropdown, input, onSelect);
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-      dropdown.classList.remove('open');
-    }
-  });
-
-  clearBtn.addEventListener('click', () => {
-    input.value = '';
-    clearBtn.style.display = 'none';
-    dropdown.classList.remove('open');
-    if (inputId === 'originInput') {
-      state.origin = null;
-      if (state.markerOrigin) { state.map.removeLayer(state.markerOrigin); state.markerOrigin = null; }
-    } else {
-      state.dest = null;
-      if (state.markerDest) { state.map.removeLayer(state.markerDest); state.markerDest = null; }
-    }
-  });
-}
-
-async function searchPlaces(q, dropdown, input, onSelect) {
-  try {
-    const res = await fetch(`/v1/ai/places/search?q=${encodeURIComponent(q)}`);
-    const places = await res.json();
-    renderDropdown(places, dropdown, input, onSelect);
-  } catch (err) {
-    const filtered = QUICK_PLACES.filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase())).slice(0, 5);
-    renderDropdown(filtered.map(p => ({ ...p, type: 'area', display: p.name })), dropdown, input, onSelect);
-  }
-}
-
-function renderDropdown(places, dropdown, input, onSelect) {
-  if (!places.length) {
-    dropdown.classList.remove('open');
-    return;
-  }
-
-  dropdown.innerHTML = places.map((p, i) => `
-    <div class="dropdown-item" data-idx="${i}">
-      <span class="dropdown-item-icon">${TYPE_ICONS[p.type] || '📍'}</span>
-      <div class="dropdown-item-text">
-        <div class="dropdown-item-name">${p.name}</div>
-        <div class="dropdown-item-type">${p.display || p.type}</div>
-      </div>
-    </div>
-  `).join('');
-  dropdown.classList.add('open');
-
-  dropdown.querySelectorAll('.dropdown-item').forEach((el, i) => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const place = places[i];
-      input.value = place.name;
-      dropdown.classList.remove('open');
-      onSelect(place);
-    });
-  });
-}
-
-function tryAutoSearch() {
-  if (state.origin && state.dest) {
-    setTimeout(() => doFindRoutes(false), 350);
-  }
-}
-
-// ──────────────────────────────────────────────
-//  MARKERS
-// ──────────────────────────────────────────────
-function makeMarkerIcon(color) {
   return L.divIcon({
     className: '',
-    html: `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.35)"></div>`,
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
+    html: `
+      <div style="position:relative;width:30px;height:42px;display:flex;flex-direction:column;align-items:center;">
+        <div style="width:26px;height:26px;background:${color};border-radius:50%;border:2.5px solid #ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;">
+          ${label}
+        </div>
+        <div style="width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:9px solid ${color};margin-top:-2px;"></div>
+      </div>`,
+    iconSize: [30, 42],
+    iconAnchor: [15, 40]
   });
 }
 
-function setMarker(type, lat, lon, label) {
-  const color = type === 'origin' ? '#1e8e3e' : '#d93025';
-  const icon = makeMarkerIcon(color);
+function setMarker(type, lat, lon, label, draggable = false) {
+  const icon = makePinIcon(type);
+
   if (type === 'origin') {
     if (state.markerOrigin) state.map.removeLayer(state.markerOrigin);
-    state.markerOrigin = L.marker([lat, lon], { icon }).addTo(state.map).bindPopup(label);
+    state.markerOrigin = L.marker([lat, lon], { icon, draggable }).addTo(state.map).bindPopup(label);
+
+    if (draggable) {
+      state.markerOrigin.on('dragend', async (e) => {
+        const newPos = e.target.getLatLng();
+        state.origin.lat = newPos.lat;
+        state.origin.lon = newPos.lng;
+        try {
+          const res = await fetch(`/v1/ai/places/reverse?lat=${newPos.lat.toFixed(5)}&lon=${newPos.lng.toFixed(5)}`);
+          const data = await res.json();
+          if (data.name) {
+            state.origin.name = data.name;
+            document.getElementById('originInput').value = data.name;
+          }
+        } catch (err) {}
+        showToast('📍 Starting point adjusted', 'info');
+        if (state.dest) doFindRoutes(true);
+      });
+    }
   } else {
     if (state.markerDest) state.map.removeLayer(state.markerDest);
-    state.markerDest = L.marker([lat, lon], { icon }).addTo(state.map).bindPopup(label);
+    state.markerDest = L.marker([lat, lon], { icon, draggable }).addTo(state.map).bindPopup(label);
+
+    if (draggable) {
+      state.markerDest.on('dragend', async (e) => {
+        const newPos = e.target.getLatLng();
+        state.dest.lat = newPos.lat;
+        state.dest.lon = newPos.lng;
+        try {
+          const res = await fetch(`/v1/ai/places/reverse?lat=${newPos.lat.toFixed(5)}&lon=${newPos.lng.toFixed(5)}`);
+          const data = await res.json();
+          if (data.name) {
+            state.dest.name = data.name;
+            document.getElementById('destInput').value = data.name;
+          }
+        } catch (err) {}
+        showToast('📍 Destination adjusted', 'info');
+        if (state.origin) doFindRoutes(true);
+      });
+    }
   }
 }
 
@@ -629,74 +633,22 @@ function fitBothMarkers() {
   if (state.origin) pts.push([state.origin.lat, state.origin.lon]);
   if (state.dest) pts.push([state.dest.lat, state.dest.lon]);
   if (pts.length === 2) {
-    state.map.fitBounds(L.latLngBounds(pts), { padding: [60, 60] });
+    state.map.fitBounds(L.latLngBounds(pts), { padding: [70, 70] });
   }
 }
 
 // ──────────────────────────────────────────────
-//  QUICK CHIPS
-// ──────────────────────────────────────────────
-function initQuickChips() {
-  const container = document.getElementById('quickChips');
-  if (!container) return;
-  container.innerHTML = '';
-
-  QUICK_PLACES.forEach(place => {
-    const chip = document.createElement('button');
-    chip.className = 'quick-chip';
-    chip.innerHTML = `${place.icon} ${place.name.replace('📍 ', '')}`;
-    chip.addEventListener('click', () => {
-      if (place.isCurrentLoc) {
-        useCurrentLocation(true);
-        return;
-      }
-
-      if (!state.origin) {
-        state.origin = place;
-        document.getElementById('originInput').value = place.name;
-        document.getElementById('originClear').style.display = '';
-        setMarker('origin', place.lat, place.lon, place.name);
-      } else if (!state.dest) {
-        state.dest = place;
-        document.getElementById('destInput').value = place.name;
-        document.getElementById('destClear').style.display = '';
-        setMarker('dest', place.lat, place.lon, place.name);
-        fitBothMarkers();
-        setTimeout(() => doFindRoutes(false), 350);
-      }
-    });
-    container.appendChild(chip);
-  });
-}
-
-// ──────────────────────────────────────────────
-//  VEHICLE SELECTOR
-// ──────────────────────────────────────────────
-function initVehicleSelector() {
-  document.querySelectorAll('.vehicle-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.vehicle-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      state.vehicle = btn.dataset.v;
-      if (state.origin && state.dest) {
-        doFindRoutes(true);
-      }
-    });
-  });
-}
-
-// ──────────────────────────────────────────────
-//  FIND ROUTES & DYNAMIC ALTERNATIVES
+//  FIND ROUTES (REAL ROAD NAVIGATION)
 // ──────────────────────────────────────────────
 async function doFindRoutes(isSilentUpdate = false) {
   if (!state.origin || !state.dest) {
-    if (!isSilentUpdate) showToast('Please select your origin and destination', 'warning');
+    if (!isSilentUpdate) showToast('Please select your starting point and destination', 'warning');
     return;
   }
 
   const btn = document.getElementById('btnFindRoutes');
   if (!isSilentUpdate && btn) {
-    btn.textContent = 'Finding routes…';
+    btn.textContent = 'Calculating optimal driving route…';
     btn.classList.add('loading');
     btn.disabled = true;
   }
@@ -718,6 +670,7 @@ async function doFindRoutes(isSilentUpdate = false) {
     });
     const data = await res.json();
 
+    state.allRoutes = data.routes || [];
     renderRoutes(data);
     showPanel('panelRoutes');
 
@@ -725,7 +678,7 @@ async function doFindRoutes(isSilentUpdate = false) {
     fetchAIInsight();
 
   } catch (err) {
-    if (!isSilentUpdate) showToast('Could not load routes. Check server connection.', 'error');
+    if (!isSilentUpdate) showToast('Could not calculate route. Please try again.', 'error');
   } finally {
     if (!isSilentUpdate && btn) {
       btn.textContent = 'Find Best Routes';
@@ -735,32 +688,71 @@ async function doFindRoutes(isSilentUpdate = false) {
   }
 }
 
+// ──────────────────────────────────────────────
+//  GOOGLE MAPS STYLE ROUTE RENDERING
+//  Multi-Color Traffic Polyline & Alternatives
+// ──────────────────────────────────────────────
+function clearRouteLayers() {
+  state.routeLayers.forEach(l => state.map.removeLayer(l));
+  state.routeLayers = [];
+  state.altRouteLayers.forEach(l => state.map.removeLayer(l));
+  state.altRouteLayers = [];
+}
+
 function renderRoutes(data) {
+  clearRouteLayers();
+
   state.activeRoute = data.routes.find(r => r.route_id === data.selected_route_id) || data.routes[0];
   const container = document.getElementById('routeCards');
-  container.innerHTML = '';
+  if (container) container.innerHTML = '';
 
-  // Draw active route on map
-  if (state.routeLayer) state.map.removeLayer(state.routeLayer);
-  if (state.activeRoute && state.activeRoute.coordinates.length > 0) {
-    state.routeLayer = L.polyline(state.activeRoute.coordinates, {
-      color: '#1a73e8',
-      weight: 7,
-      opacity: 0.92
-    }).addTo(state.map);
-    state.map.fitBounds(state.routeLayer.getBounds(), { padding: [50, 50] });
-  }
-
+  // 1. Draw Alternative Routes in subtle gray underneath
   data.routes.forEach(route => {
-    const isSelected = route.route_id === (state.activeRoute ? state.activeRoute.route_id : data.selected_route_id);
+    if (route.route_id !== state.activeRoute.route_id && route.coordinates.length > 1) {
+      const altPoly = L.polyline(route.coordinates, {
+        color: '#78909C',
+        weight: 6,
+        opacity: 0.65,
+        lineCap: 'round',
+        lineJoin: 'round'
+      }).addTo(state.map);
+
+      // Tooltip to click and select this alternative
+      const mins = Math.round(route.total_duration_sec / 60);
+      const diffMins = mins - Math.round(state.activeRoute.total_duration_sec / 60);
+      const diffText = diffMins > 0 ? `+${diffMins} min` : (diffMins < 0 ? `${diffMins} min` : 'Same time');
+
+      altPoly.bindTooltip(`${diffText} (${(route.total_distance_m / 1000).toFixed(1)} km)`, {
+        permanent: true,
+        direction: 'center',
+        className: 'route-diff-tooltip'
+      });
+
+      altPoly.on('click', () => {
+        selectRoute(route, data);
+      });
+
+      state.altRouteLayers.push(altPoly);
+    }
+  });
+
+  // 2. Draw Active Route with Google Maps Multi-Color Traffic Polyline!
+  drawActiveTrafficRoute(state.activeRoute);
+
+  // 3. Render Route Cards
+  data.routes.forEach(route => {
+    const isSelected = route.route_id === state.activeRoute.route_id;
     const mins = Math.round(route.total_duration_sec / 60);
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    const timeDisplay = hrs > 0 ? `${hrs}h ${remMins}m` : `${mins}`;
     const km = (route.total_distance_m / 1000).toFixed(1);
 
     let badge = '', badgeClass = '';
     if (route.route_type === 'primary_verified') {
-      badge = 'Primary'; badgeClass = 'badge-primary';
+      badge = 'Fastest'; badgeClass = 'badge-primary';
     } else if (route.route_type === 'traffic_aware_alternative') {
-      badge = 'Alt Route'; badgeClass = 'badge-alt';
+      badge = 'Alternative'; badgeClass = 'badge-alt';
     } else {
       badge = 'Caution'; badgeClass = 'badge-caution';
     }
@@ -770,56 +762,111 @@ function renderRoutes(data) {
     const statusBarClass = `status-bar-${route.status}`;
     const reasonDotColor = route.is_recommended ? '#1e8e3e' : '#d93025';
 
-    const budgetHtml = route.diversion_budget_remaining != null
-      ? `<span class="budget-pill">🚦 ${route.diversion_budget_remaining} detour spots remaining</span>`
-      : '';
-
     const card = document.createElement('div');
     card.className = `route-card${isSelected ? ' selected' : ''}${!route.is_recommended ? ' rejected' : ''}`;
     card.innerHTML = `
       <div class="route-card-header">
         <span class="route-type-badge ${badgeClass}">${badge}</span>
-        <div class="route-time"><span class="route-time-min">${mins}</span><span class="route-time-unit">min</span></div>
+        <div class="route-time"><span class="route-time-min">${timeDisplay}</span><span class="route-time-unit">${hrs > 0 ? '' : 'min'}</span></div>
       </div>
       <div class="route-card-body">
         <div class="route-name">${route.summary}</div>
-        <div class="route-dist">${km} km · ${route.segment_names.join(' → ')}</div>
+        <div class="route-dist">${km} km · Real Road Navigation</div>
         <div class="route-reason">
           <div class="route-reason-dot" style="background:${reasonDotColor}"></div>
           ${route.recommendation_reason}
         </div>
-        ${budgetHtml}
       </div>
       <div class="route-status-bar ${statusBarClass}"></div>
     `;
 
     card.addEventListener('click', () => {
-      document.querySelectorAll('.route-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-      state.activeRoute = route;
-
-      if (state.routeLayer) state.map.removeLayer(state.routeLayer);
-      if (route.coordinates.length > 0) {
-        state.routeLayer = L.polyline(route.coordinates, {
-          color: '#1a73e8', weight: 7, opacity: 0.92
-        }).addTo(state.map);
-        state.map.fitBounds(state.routeLayer.getBounds(), { padding: [50, 50] });
-      }
+      selectRoute(route, data);
     });
 
-    container.appendChild(card);
+    if (container) container.appendChild(card);
   });
 
-  // Show Start Trip only if there is a recommended route
+  // Show Start Trip button
   const startBtn = document.getElementById('btnStartTrip');
-  startBtn.style.display = data.routes.some(r => r.is_recommended) ? '' : 'none';
+  if (startBtn) {
+    startBtn.style.display = data.routes.some(r => r.is_recommended) ? '' : 'none';
+  }
 
-  // AI bar on map
+  // Floating AI Summary Bar
   const aiBar = document.getElementById('aiBar');
   if (aiBar) {
     aiBar.style.display = 'flex';
     document.getElementById('aiBarText').textContent = data.decision_rationale;
   }
+}
+
+function selectRoute(route, data) {
+  state.activeRoute = route;
+  document.querySelectorAll('.route-card').forEach((c, idx) => {
+    if (data.routes[idx] && data.routes[idx].route_id === route.route_id) {
+      c.classList.add('selected');
+    } else {
+      c.classList.remove('selected');
+    }
+  });
+
+  clearRouteLayers();
+
+  // Re-draw with this route active
+  data.routes.forEach(r => {
+    if (r.route_id !== route.route_id && r.coordinates.length > 1) {
+      const altPoly = L.polyline(r.coordinates, {
+        color: '#78909C', weight: 6, opacity: 0.65, lineCap: 'round', lineJoin: 'round'
+      }).addTo(state.map);
+      state.altRouteLayers.push(altPoly);
+    }
+  });
+
+  drawActiveTrafficRoute(route);
+}
+
+function drawActiveTrafficRoute(route) {
+  if (!route || !route.coordinates || route.coordinates.length < 2) return;
+
+  // Layer 1: Sleek Casing / Border (Google Maps style dark/white outline)
+  const casingPoly = L.polyline(route.coordinates, {
+    color: '#0d47a1',
+    weight: 9,
+    opacity: 0.8,
+    lineCap: 'round',
+    lineJoin: 'round'
+  }).addTo(state.map);
+  state.routeLayers.push(casingPoly);
+
+  // Layer 2: Multi-color traffic segments (Green, Yellow, Red)
+  if (route.traffic_segments && route.traffic_segments.length > 0) {
+    route.traffic_segments.forEach(ts => {
+      if (ts.coordinates && ts.coordinates.length > 1) {
+        const segPoly = L.polyline(ts.coordinates, {
+          color: ts.color || '#1E8E3E',
+          weight: 5.5,
+          opacity: 0.96,
+          lineCap: 'round',
+          lineJoin: 'round'
+        }).addTo(state.map);
+        state.routeLayers.push(segPoly);
+      }
+    });
+  } else {
+    // Solid vibrant navigation line
+    const mainPoly = L.polyline(route.coordinates, {
+      color: '#1A73E8',
+      weight: 5.5,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round'
+    }).addTo(state.map);
+    state.routeLayers.push(mainPoly);
+  }
+
+  // Smoothly fit bounds to show the entire road trip
+  state.map.fitBounds(casingPoly.getBounds(), { padding: [60, 60] });
 }
 
 // ──────────────────────────────────────────────
@@ -831,10 +878,10 @@ async function fetchAIInsight() {
   const tipBox = document.getElementById('aiTipBox');
   const dots = document.getElementById('aiLoadingDots');
 
-  dots.style.display = 'flex';
-  metrics.style.display = 'none';
-  tipBox.style.display = 'none';
-  summary.textContent = 'AI is evaluating pilot corridor conditions…';
+  if (dots) dots.style.display = 'flex';
+  if (metrics) metrics.style.display = 'none';
+  if (tipBox) tipBox.style.display = 'none';
+  if (summary) summary.textContent = 'AI is evaluating road conditions…';
 
   try {
     const payload = {
@@ -849,29 +896,28 @@ async function fetchAIInsight() {
     });
     const insight = await res.json();
 
-    dots.style.display = 'none';
-    summary.textContent = insight.summary;
+    if (dots) dots.style.display = 'none';
+    if (summary) summary.textContent = insight.summary;
 
     document.getElementById('aiSafetyScore').textContent = insight.safety_score;
     document.getElementById('aiEta').textContent = insight.estimated_eta;
     document.getElementById('aiForecast').textContent = insight.congestion_forecast.split('.')[0] + '.';
     document.getElementById('aiTip').textContent = insight.smart_tip;
 
-    metrics.style.display = 'grid';
-    tipBox.style.display = 'flex';
+    if (metrics) metrics.style.display = 'grid';
+    if (tipBox) tipBox.style.display = 'flex';
 
-    // Update floating map bar
     const barText = document.getElementById('aiBarText');
     if (barText) barText.textContent = `✦ AI: ${insight.smart_tip}`;
 
   } catch (err) {
-    dots.style.display = 'none';
-    summary.textContent = 'AI route analysis temporarily in offline mode.';
+    if (dots) dots.style.display = 'none';
+    if (summary) summary.textContent = 'AI route analysis temporarily in offline mode.';
   }
 }
 
 // ──────────────────────────────────────────────
-//  ACTIVE TRIP & REAL-TIME GPS TRACKING
+//  ACTIVE NAVIGATION (TURN-BY-TURN HUD)
 // ──────────────────────────────────────────────
 async function doStartTrip() {
   const btn = document.getElementById('btnStartTrip');
@@ -887,22 +933,18 @@ async function doStartTrip() {
     const data = await res.json();
     state.currentSessionToken = data.session_token;
     state.tripStartTime = Date.now();
-    state.tripRouteIndex = 0;
+    state.tripStepIndex = 0;
+    state.tripCoordIndex = 0;
 
     showPanel('panelTrip');
 
-    // Navigation Instructions
-    if (state.activeRoute) {
-      document.getElementById('navPrimary').textContent = 'Follow the verified route';
-      document.getElementById('navSecondary').textContent = state.activeRoute.segment_names[0] || '100 Feet Road';
-      document.getElementById('statDist').textContent = (state.activeRoute.total_distance_m / 1000).toFixed(1);
-      document.getElementById('statTime').textContent = Math.round(state.activeRoute.total_duration_sec / 60);
-    }
+    // Update Turn-by-turn Navigation instructions
+    updateTurnByTurnHUD();
 
-    // Launch Foreground GPS Tracking
-    startForegroundGpsTracking();
+    // Start Real GPS watch
+    startActiveGpsNavigation();
 
-    showToast('🚀 Active Trip Started. Real-time telemetry transmitting foreground speeds.', 'success');
+    showToast('🚀 Navigation active. Real-time GPS transmitting foreground speeds.', 'success');
 
   } catch (err) {
     showToast('Failed to start trip session', 'error');
@@ -912,101 +954,113 @@ async function doStartTrip() {
   }
 }
 
-function startForegroundGpsTracking() {
-  // Real GPS tracking using navigator.geolocation.watchPosition
+function updateTurnByTurnHUD() {
+  if (!state.activeRoute) return;
+
+  const steps = state.activeRoute.steps || [];
+  if (steps.length > 0 && state.tripStepIndex < steps.length) {
+    const curStep = steps[state.tripStepIndex];
+    const arrow = MANEUVER_ICONS[curStep.modifier] || MANEUVER_ICONS[curStep.type] || '⬆';
+
+    document.getElementById('navPrimary').textContent = curStep.instruction || 'Follow the verified route';
+    document.getElementById('navSecondary').textContent = curStep.name || state.activeRoute.summary;
+    document.getElementById('navDist').textContent = curStep.distance_m ? `${Math.round(curStep.distance_m)} m` : '';
+
+    const nextStep = steps[state.tripStepIndex + 1];
+    const nextPreview = document.getElementById('navNextStep');
+    if (nextStep && nextPreview) {
+      nextPreview.style.display = 'flex';
+      document.getElementById('navNextText').textContent = `Then ${nextStep.instruction.toLowerCase()} in ${Math.round(nextStep.distance_m)}m`;
+    }
+  } else {
+    document.getElementById('navPrimary').textContent = 'Follow the verified road route';
+    document.getElementById('navSecondary').textContent = state.activeRoute.summary || '';
+  }
+
+  document.getElementById('statDist').textContent = (state.activeRoute.total_distance_m / 1000).toFixed(1);
+  document.getElementById('statTime').textContent = Math.round(state.activeRoute.total_duration_sec / 60);
+}
+
+function startActiveGpsNavigation() {
   if (navigator.geolocation) {
     state.watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        handleRealGpsPosition(position);
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const accuracy = Math.round(pos.coords.accuracy || 12);
+        const rawSpeed = pos.coords.speed;
+        const speedKph = rawSpeed != null && rawSpeed >= 0 ? Math.round(rawSpeed * 3.6) : null;
+
+        if (speedKph != null && speedKph > 0) {
+          state.currentSpeedKph = speedKph;
+          document.getElementById('statSpeed').textContent = speedKph;
+        }
+
+        updateUserMarker(lat, lon, accuracy);
+
+        const badgeText = document.getElementById('gpsBadgeText');
+        if (badgeText) {
+          badgeText.textContent = `📡 Live GPS: ±${accuracy}m · ${state.currentSpeedKph} km/h`;
+        }
+
+        if (state.currentSessionToken) {
+          transmitObservation(lat, lon, state.currentSpeedKph || 25, accuracy);
+        }
       },
-      (err) => {
-        console.warn('watchPosition error:', err);
-      },
+      (err) => console.warn('watchPosition error:', err),
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 6000 }
     );
   }
 
-  // Active loop: handles updates every 2.5s
-  let currentLat = state.origin ? state.origin.lat : 12.9750;
-  let currentLon = state.origin ? state.origin.lon : 77.6406;
-  const coordsList = state.activeRoute && state.activeRoute.coordinates.length > 0
-    ? state.activeRoute.coordinates
-    : [[currentLat, currentLon]];
-
+  // Smooth route progression simulator (ensures active test demo in stationary / desktop environments)
+  const coords = state.activeRoute?.coordinates || [];
   state.tripSimTimer = setInterval(() => {
-    // If we have route coordinates, advance along the path
-    if (coordsList.length > 1) {
-      state.tripRouteIndex = (state.tripRouteIndex + 1) % coordsList.length;
-      const pt = coordsList[state.tripRouteIndex];
-      currentLat = pt[0] + (Math.random() - 0.5) * 0.0001;
-      currentLon = pt[1] + (Math.random() - 0.5) * 0.0001;
-    }
+    if (coords.length > 1) {
+      state.tripCoordIndex = (state.tripCoordIndex + 2) % coords.length;
+      const pt = coords[state.tripCoordIndex];
+      const lat = pt[0];
+      const lon = pt[1];
 
-    // Realistic vehicle speed calculation
-    const baseSpeed = state.vehicle === 'two_wheeler' ? 36 : state.vehicle === 'auto_rickshaw' ? 26 : 32;
-    const speedVariation = (Math.random() - 0.5) * 8;
-    const speed = Math.round(Math.max(8, Math.min(55, baseSpeed + speedVariation)));
-    state.currentSpeedKph = speed;
+      // Advance step index smoothly
+      const steps = state.activeRoute.steps || [];
+      if (steps.length > 1) {
+        state.tripStepIndex = Math.min(steps.length - 1, Math.floor((state.tripCoordIndex / coords.length) * steps.length));
+        updateTurnByTurnHUD();
+      }
 
-    document.getElementById('statSpeed').textContent = speed;
+      // Speed simulation
+      const baseSpeed = state.vehicle === 'two_wheeler' ? 38 : state.vehicle === 'auto_rickshaw' ? 26 : 35;
+      const speed = Math.round(baseSpeed + (Math.random() - 0.5) * 8);
+      state.currentSpeedKph = Math.max(10, speed);
+      document.getElementById('statSpeed').textContent = state.currentSpeedKph;
 
-    // Update Live User Marker & Accuracy Circle on Map
-    updateUserPositionMarker(currentLat, currentLon, 10);
+      updateUserMarker(lat, lon, 10);
 
-    // Update remaining trip time & distance
-    if (state.activeRoute) {
-      const elapsed = (Date.now() - state.tripStartTime) / 1000;
-      const remainingSec = Math.max(0, state.activeRoute.total_duration_sec - elapsed);
+      // Countdown distance & ETA
+      const elapsedSec = (Date.now() - state.tripStartTime) / 1000;
+      const remainingSec = Math.max(0, state.activeRoute.total_duration_sec - elapsedSec);
       document.getElementById('statTime').textContent = Math.round(remainingSec / 60);
 
       const totalKm = state.activeRoute.total_distance_m / 1000;
-      const distTraveledKm = (speed / 3600) * elapsed;
+      const distTraveledKm = (state.currentSpeedKph / 3600) * elapsedSec;
       const distLeft = Math.max(0, totalKm - distTraveledKm);
       document.getElementById('statDist').textContent = distLeft.toFixed(1);
-    }
 
-    // Transmit Real Observation to Backend
-    // Backend evaluates congestion and immediately broadcasts via WebSocket
-    if (state.currentSessionToken) {
-      transmitObservation(currentLat, currentLon, speed, 8.5);
+      if (state.currentSessionToken) {
+        transmitObservation(lat, lon, state.currentSpeedKph, 8.0);
+      }
     }
-  }, 2500);
+  }, 2200);
 }
 
-function handleRealGpsPosition(position) {
-  const lat = position.coords.latitude;
-  const lon = position.coords.longitude;
-  const accuracy = Math.round(position.coords.accuracy || 12);
-  const rawSpeed = position.coords.speed; // meters per second
-  const speedKph = rawSpeed != null && rawSpeed >= 0 ? Math.round(rawSpeed * 3.6) : null;
-
-  if (speedKph != null && speedKph > 0) {
-    state.currentSpeedKph = speedKph;
-    document.getElementById('statSpeed').textContent = speedKph;
-  }
-
-  updateUserPositionMarker(lat, lon, accuracy);
-
-  const badgeText = document.getElementById('gpsBadgeText');
-  if (badgeText) {
-    badgeText.textContent = `📡 GPS Active: ±${accuracy}m · ${state.currentSpeedKph} km/h`;
-  }
-
-  // Transmit real GPS point to backend
-  if (state.currentSessionToken) {
-    transmitObservation(lat, lon, state.currentSpeedKph || 28, accuracy);
-  }
-}
-
-function updateUserPositionMarker(lat, lon, accuracy) {
+function updateUserMarker(lat, lon, accuracy) {
   if (!state.userMarker) {
-    // Pulsing blue navigation dot
     const userIcon = L.divIcon({
       className: '',
       html: `
         <div style="position:relative;width:24px;height:24px;">
           <div style="position:absolute;inset:0;background:#1a73e8;border-radius:50%;opacity:0.35;animation:livePulse 1.4s infinite;"></div>
-          <div style="position:absolute;inset:4px;background:#1a73e8;border:3px solid #ffffff;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>
+          <div style="position:absolute;inset:4px;background:#1a73e8;border:3px solid #ffffff;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.45);"></div>
         </div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12]
@@ -1026,6 +1080,9 @@ function updateUserPositionMarker(lat, lon, accuracy) {
       state.userAccuracyCircle.setRadius(accuracy);
     }
   }
+
+  // Smoothly keep user centered during active trip
+  state.map.panTo([lat, lon], { animate: true, duration: 0.8 });
 }
 
 async function transmitObservation(lat, lon, speed, accuracy) {
@@ -1035,8 +1092,7 @@ async function transmitObservation(lat, lon, speed, accuracy) {
     session_token: state.currentSessionToken,
     observations: [{
       timestamp: new Date().toISOString(),
-      lat,
-      lon,
+      lat, lon,
       speed_kph: speed,
       accuracy_m: accuracy
     }]
@@ -1048,25 +1104,20 @@ async function transmitObservation(lat, lon, speed, accuracy) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-  } catch (err) {
-    // Non-blocking telemetry
-  }
+  } catch (err) {}
 }
 
 async function doEndTrip() {
-  // Halt GPS watch immediately
   if (state.watchId && navigator.geolocation) {
     navigator.geolocation.clearWatch(state.watchId);
     state.watchId = null;
   }
 
-  // Clear timers
   if (state.tripSimTimer) {
     clearInterval(state.tripSimTimer);
     state.tripSimTimer = null;
   }
 
-  // Remove live user markers
   if (state.userMarker) {
     state.map.removeLayer(state.userMarker);
     state.userMarker = null;
@@ -1076,7 +1127,6 @@ async function doEndTrip() {
     state.userAccuracyCircle = null;
   }
 
-  // Terminate backend session
   if (state.currentSessionToken) {
     try {
       await fetch('/v1/trips/end', {
@@ -1108,9 +1158,8 @@ function handlePageUnload() {
 }
 
 function handleVisibilityChange() {
-  // Foreground privacy guarantee: if tab goes hidden, we pause active updates
   if (document.hidden && state.currentSessionToken) {
-    console.log('SmartTraffic: Tab hidden — foreground-only policy active.');
+    console.log('SmartTraffic: Foreground-only location policy enforced.');
   }
 }
 
@@ -1132,8 +1181,143 @@ async function submitIncident(type) {
 }
 
 // ──────────────────────────────────────────────
-//  PANEL NAVIGATION
+//  SEGMENTS & STATUS GRID
 // ──────────────────────────────────────────────
+function getSegmentStyle(seg) {
+  if (seg.status === 'closed') return { color: '#5f6368', weight: 5, dashArray: '8 6' };
+  if (seg.status === 'congested') return { color: '#d93025', weight: 6 };
+  if (seg.status === 'slowing') return { color: '#f9ab00', weight: 5 };
+  if (seg.road_class === 'residential') return { color: '#7c4dff', weight: 4, dashArray: '5 5', opacity: 0.7 };
+  return { color: '#1e8e3e', weight: 5 };
+}
+
+function renderSegments(segs) {
+  segs.forEach(seg => {
+    const style = { ...getSegmentStyle(seg), opacity: 0.9 };
+    const speed = seg.current_speed_kph ?? seg.baseline_speed_kph;
+    const pctBaseline = Math.round((speed / seg.baseline_speed_kph) * 100);
+
+    const popupHtml = `
+      <div style="font-family:Inter,sans-serif;min-width:190px;font-size:12px;">
+        <div style="font-weight:700;font-size:13px;color:#202124;margin-bottom:6px;">${seg.name}</div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="color:#5f6368">Status</span>
+          <span style="font-weight:700;color:${style.color}">${seg.status.toUpperCase()}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="color:#5f6368">Speed</span>
+          <span style="font-weight:600">${speed} km/h <span style="color:#9aa0a6">(${pctBaseline}%)</span></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="color:#5f6368">Evidence</span>
+          <span style="font-weight:600">${seg.sample_count} devices (${seg.confidence})</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:#5f6368">Detour quota</span>
+          <span style="font-weight:600">${seg.current_diversion_count}/${seg.diversion_cap}</span>
+        </div>
+      </div>
+    `;
+
+    if (state.segmentLayers[seg.segment_id]) {
+      const poly = state.segmentLayers[seg.segment_id];
+      poly.setStyle(style);
+      poly.setPopupContent(popupHtml);
+    } else {
+      const poly = L.polyline(seg.coordinates, style).addTo(state.map);
+      poly.bindPopup(popupHtml, { maxWidth: 220 });
+      state.segmentLayers[seg.segment_id] = poly;
+    }
+  });
+}
+
+async function loadSegmentsHttp() {
+  try {
+    const res = await fetch('/v1/traffic/segments');
+    const segs = await res.json();
+    state.cachedSegments = segs;
+    renderSegments(segs);
+    updateStatusGrid(segs);
+  } catch (err) {}
+}
+
+function updateStatusGrid(segs) {
+  const grid = document.getElementById('statusGrid');
+  if (!grid) return;
+  grid.innerHTML = segs.slice(0, 8).map(seg => {
+    const color = seg.status === 'congested' ? '#d93025' : seg.status === 'slowing' ? '#f9ab00' : '#1e8e3e';
+    const speed = Math.round(seg.current_speed_kph ?? seg.baseline_speed_kph);
+    return `
+      <div class="status-item">
+        <div class="status-item-dot" style="background:${color}"></div>
+        <span class="status-item-name">${seg.name.split('(')[0].trim()}</span>
+        <span class="status-item-speed">${speed} km/h</span>
+      </div>`;
+  }).join('');
+}
+
+async function pollTrafficSummary() {
+  try {
+    const res = await fetch('/v1/ai/traffic-summary');
+    const data = await res.json();
+    updateTrafficSummaryBadge({
+      level: data.overall_level,
+      color: data.color,
+      emoji: data.emoji
+    });
+  } catch (err) {}
+}
+
+// ──────────────────────────────────────────────
+//  UI UTILITIES
+// ──────────────────────────────────────────────
+function initQuickChips() {
+  const container = document.getElementById('quickChips');
+  if (!container) return;
+  container.innerHTML = '';
+
+  POPULAR_HUBS.forEach(place => {
+    const chip = document.createElement('button');
+    chip.className = 'quick-chip';
+    chip.innerHTML = `${place.isCurrentLoc ? '📍' : (TYPE_ICONS[place.type] || '📍')} ${place.name.replace('📍 ', '')}`;
+    chip.addEventListener('click', () => {
+      if (place.isCurrentLoc) {
+        acquireUserLocation(true);
+        return;
+      }
+
+      if (!state.origin) {
+        state.origin = place;
+        document.getElementById('originInput').value = place.name;
+        document.getElementById('originClear').style.display = '';
+        setMarker('origin', place.lat, place.lon, place.name, true);
+        state.map.flyTo([place.lat, place.lon], 13);
+      } else if (!state.dest) {
+        state.dest = place;
+        document.getElementById('destInput').value = place.name;
+        document.getElementById('destClear').style.display = '';
+        setMarker('dest', place.lat, place.lon, place.name, false);
+        fitBothMarkers();
+        setTimeout(() => doFindRoutes(false), 350);
+      }
+    });
+    container.appendChild(chip);
+  });
+}
+
+function initVehicleSelector() {
+  document.querySelectorAll('.vehicle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.vehicle-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.vehicle = btn.dataset.v;
+      if (state.origin && state.dest) {
+        doFindRoutes(true);
+      }
+    });
+  });
+}
+
 function showPanel(panelId) {
   ['panelSearch', 'panelRoutes', 'panelTrip'].forEach(id => {
     const el = document.getElementById(id);
@@ -1143,9 +1327,6 @@ function showPanel(panelId) {
   });
 }
 
-// ──────────────────────────────────────────────
-//  BOTTOM SHEET GESTURES
-// ──────────────────────────────────────────────
 function initBottomSheet() {
   const sheet = document.getElementById('bottomSheet');
   const handle = document.getElementById('sheetHandle');
@@ -1154,19 +1335,13 @@ function initBottomSheet() {
   let startY = 0, startH = 0, dragging = false;
   const getH = () => sheet.getBoundingClientRect().height;
 
-  function onStart(y) {
-    startY = y;
-    startH = getH();
-    dragging = true;
-  }
-
+  function onStart(y) { startY = y; startH = getH(); dragging = true; }
   function onMove(y) {
     if (!dragging) return;
     const delta = startY - y;
     const newH = Math.max(90, Math.min(window.innerHeight * 0.9, startH + delta));
     sheet.style.maxHeight = newH + 'px';
   }
-
   function onEnd() {
     if (!dragging) return;
     dragging = false;
@@ -1186,9 +1361,6 @@ function initBottomSheet() {
   window.addEventListener('mouseup', onEnd);
 }
 
-// ──────────────────────────────────────────────
-//  SIDE DRAWER
-// ──────────────────────────────────────────────
 function initDrawer() {
   const drawer = document.getElementById('sideDrawer');
   const overlay = document.getElementById('drawerOverlay');
@@ -1200,9 +1372,6 @@ function initDrawer() {
   overlay?.addEventListener('click', close);
 }
 
-// ──────────────────────────────────────────────
-//  SIMULATION SCENARIOS
-// ──────────────────────────────────────────────
 function initSimulationButtons() {
   document.querySelectorAll('.sim-btn[data-sim]').forEach(btn => {
     btn.addEventListener('click', () => runSimulation(btn.dataset.sim));
@@ -1212,27 +1381,15 @@ function initSimulationButtons() {
 
 async function runSimulation(scenario) {
   async function getToken() {
-    const r = await fetch('/v1/trips/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}'
-    });
-    const d = await r.json();
-    return d.session_token;
+    const r = await fetch('/v1/trips/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json(); return d.session_token;
   }
-
   async function postObs(token, lat, lon, speed) {
     await fetch('/v1/traffic/observations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         session_token: token,
-        observations: [{
-          timestamp: new Date().toISOString(),
-          lat, lon,
-          speed_kph: speed,
-          accuracy_m: 8
-        }]
+        observations: [{ timestamp: new Date().toISOString(), lat, lon, speed_kph: speed, accuracy_m: 8 }]
       })
     });
   }
@@ -1242,13 +1399,13 @@ async function runSimulation(scenario) {
   if (scenario === 'normal') {
     for (let i = 0; i < 4; i++) {
       const tok = await getToken();
-      await postObs(tok, seg_lat + i * 0.0001, seg_lon, 34 + i);
+      await postObs(tok, seg_lat + i * 0.0001, seg_lon, 35 + i);
     }
-    showToast('✅ Normal flow: 4 devices report ~35 km/h. Corridor evaluated NORMAL.', 'success');
+    showToast('✅ Normal flow: 4 devices report ~36 km/h. Corridor evaluated NORMAL.', 'success');
   } else if (scenario === 'single_glitch') {
     const tok = await getToken();
     await postObs(tok, seg_lat, seg_lon, 3.0);
-    showToast('🔵 Single-phone at 3 km/h → Alert REJECTED (< 3 device rule). Corridor stays NORMAL.', 'info');
+    showToast('🔵 Single-phone at 3 km/h → Alert REJECTED (< 3 device rule). Stays NORMAL.', 'info');
   } else if (scenario === 'congestion') {
     for (let i = 0; i < 5; i++) {
       const tok = await getToken();
@@ -1257,29 +1414,22 @@ async function runSimulation(scenario) {
     showToast('🔴 Genuine congestion! 5 devices at ~9 km/h → 100ft Rd marked CONGESTED.', 'error');
   } else if (scenario === 'detour_cap') {
     await fetch('/v1/admin/segments/seg_suranjan_conn/override', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ diversion_cap: 20, reset_diversion_count: false })
     });
-    showToast('🟣 Detour cap scenario active. Recalculate routes to view remaining quotas.', 'warning');
+    showToast('🟣 Detour cap scenario active. Check remaining quotas.', 'warning');
   }
 }
 
 async function doReset() {
   await fetch('/v1/admin/reset', { method: 'POST' });
-  if (state.routeLayer) {
-    state.map.removeLayer(state.routeLayer);
-    state.routeLayer = null;
-  }
+  clearRouteLayers();
   const aiBar = document.getElementById('aiBar');
   if (aiBar) aiBar.style.display = 'none';
   showPanel('panelSearch');
-  showToast('🔄 Pilot network & congestion states reset to baseline.', 'info');
+  showToast('🔄 Pilot network reset to baseline.', 'info');
 }
 
-// ──────────────────────────────────────────────
-//  TOAST NOTIFICATIONS
-// ──────────────────────────────────────────────
 function showToast(message, type = 'info') {
   const container = document.getElementById('toastContainer');
   if (!container) return;

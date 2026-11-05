@@ -34,6 +34,8 @@ class RouteCandidate(BaseModel):
     recommendation_reason: str
     diversion_budget_remaining: Optional[int] = None
     suitability_notes: List[str] = []
+    traffic_segments: List[Dict] = []
+    steps: List[Dict] = []
 
 class RouteResponse(BaseModel):
     origin: Coordinate

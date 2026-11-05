@@ -34,63 +34,98 @@ class PlaceResult(BaseModel):
 #  Works for ANY location in India, completely free.
 # ─────────────────────────────────────────────────────
 @router.get("/places/search")
-async def search_places(q: str = "", limit: int = 8) -> List[dict]:
+async def search_places(q: str = "", limit: int = 10) -> List[dict]:
     """
     Real geocoding search using OpenStreetMap Nominatim.
-    Returns actual lat/lon for any location typed by user.
-    Falls back to pilot area preset list if network unavailable.
+    Returns actual lat/lon for any location typed by user across India.
     """
-    if not q or len(q) < 2:
-        return _get_pilot_presets()[:6]
+    cleaned = (q or "").strip()
+    if not cleaned or len(cleaned) < 2:
+        return _get_pilot_presets()[:8]
 
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={
-                    "q": q + ", Bangalore, India",
+                    "q": cleaned,
                     "format": "json",
                     "limit": limit,
                     "addressdetails": 1,
                     "countrycodes": "in",
                     "accept-language": "en"
                 },
-                headers={"User-Agent": "SmartTrafficBengaluruPilot/1.0"}
+                headers={"User-Agent": "SmartTrafficNavigationPlatform/2.0"}
             )
             data = resp.json()
             results = []
             for item in data:
-                name = item.get("display_name", "")
-                # Shorten display name: take first 2 parts
-                short = ", ".join(name.split(", ")[:2])
+                display_name = item.get("display_name", "")
+                parts = [p.strip() for p in display_name.split(",") if p.strip()]
+                # Short title: 1 or 2 parts
+                short_title = ", ".join(parts[:2]) if len(parts) >= 2 else display_name
+                # Full subtitle: clean address
+                full_sub = ", ".join(parts[:5]) if len(parts) >= 3 else display_name
+
                 t = item.get("type", "place")
                 results.append({
-                    "name": short,
+                    "name": short_title,
                     "lat": float(item["lat"]),
                     "lon": float(item["lon"]),
                     "type": t,
-                    "display": name[:60]
+                    "display": full_sub
                 })
-            return results if results else _get_pilot_presets_filtered(q)
+
+            if results:
+                return results
+
+            # If no results and query was simple, try with Karnataka/Bangalore context as fallback
+            if len(cleaned.split()) <= 2:
+                resp2 = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={
+                        "q": f"{cleaned}, Bangalore",
+                        "format": "json",
+                        "limit": 5,
+                        "addressdetails": 1,
+                        "countrycodes": "in",
+                        "accept-language": "en"
+                    },
+                    headers={"User-Agent": "SmartTrafficNavigationPlatform/2.0"}
+                )
+                data2 = resp2.json()
+                for item in data2:
+                    display_name = item.get("display_name", "")
+                    parts = [p.strip() for p in display_name.split(",") if p.strip()]
+                    results.append({
+                        "name": ", ".join(parts[:2]),
+                        "lat": float(item["lat"]),
+                        "lon": float(item["lon"]),
+                        "type": item.get("type", "place"),
+                        "display": display_name
+                    })
+
+            return results if results else _get_pilot_presets_filtered(cleaned)
     except Exception:
-        return _get_pilot_presets_filtered(q)
+        return _get_pilot_presets_filtered(cleaned)
 
 def _get_pilot_presets():
     return [
-        {"name": "CMH Road Junction", "lat": 12.9784, "lon": 77.6408, "type": "junction", "display": "CMH Road Junction, Indiranagar, Bengaluru"},
-        {"name": "100 Feet Road, Indiranagar", "lat": 12.9750, "lon": 77.6407, "type": "road", "display": "100 Feet Road, Indiranagar, Bengaluru"},
-        {"name": "Domlur Flyover", "lat": 12.9610, "lon": 77.6385, "type": "landmark", "display": "Domlur Flyover, Bengaluru"},
-        {"name": "Embassy Golf Links (EGL)", "lat": 12.9515, "lon": 77.6360, "type": "landmark", "display": "Embassy Golf Links, IRR, Bengaluru"},
-        {"name": "Sony World Junction", "lat": 12.9352, "lon": 77.6245, "type": "junction", "display": "Sony World Junction, Koramangala, Bengaluru"},
-        {"name": "Koramangala 4th Block", "lat": 12.9420, "lon": 77.6290, "type": "area", "display": "4th Block, Koramangala, Bengaluru"},
-        {"name": "Old Airport Road", "lat": 12.9635, "lon": 77.6465, "type": "road", "display": "Old Airport Road, Domlur, Bengaluru"},
-        {"name": "Suranjan Das Road", "lat": 12.9690, "lon": 77.6580, "type": "road", "display": "Suranjan Das Road, Indiranagar, Bengaluru"},
-        {"name": "Indiranagar Metro", "lat": 12.9784, "lon": 77.6408, "type": "transit", "display": "Indiranagar Metro Station, Bengaluru"},
+        {"name": "CMH Road Junction", "lat": 12.9784, "lon": 77.6408, "type": "junction", "display": "CMH Road, Indiranagar, Bengaluru, Karnataka"},
+        {"name": "100 Feet Road, Indiranagar", "lat": 12.9750, "lon": 77.6407, "type": "road", "display": "100 Feet Road, Indiranagar, Bengaluru, Karnataka"},
+        {"name": "Domlur Flyover", "lat": 12.9610, "lon": 77.6385, "type": "landmark", "display": "Domlur Flyover, Old Airport Road, Bengaluru"},
+        {"name": "Sony World Junction", "lat": 12.9352, "lon": 77.6245, "type": "junction", "display": "Sony World Junction, 80ft Road, Koramangala, Bengaluru"},
+        {"name": "Kempegowda International Airport", "lat": 13.1986, "lon": 77.7066, "type": "transit", "display": "BLR Airport, Devanahalli, Bengaluru, Karnataka"},
+        {"name": "Embassy Golf Links (EGL)", "lat": 12.9515, "lon": 77.6360, "type": "landmark", "display": "Embassy Golf Links Business Park, IRR, Bengaluru"},
+        {"name": "MG Road Metro Station", "lat": 12.9756, "lon": 77.6066, "type": "transit", "display": "Mahatma Gandhi Road, Bengaluru, Karnataka"},
+        {"name": "Whitefield ITPL", "lat": 12.9863, "lon": 77.7381, "type": "area", "display": "International Tech Park Bangalore (ITPL), Whitefield"},
+        {"name": "Solapur", "lat": 17.6599, "lon": 75.9064, "type": "place", "display": "Solapur, Maharashtra, India"},
+        {"name": "Mysuru (Mysore)", "lat": 12.2958, "lon": 76.6394, "type": "place", "display": "Mysuru, Karnataka, India"},
     ]
 
 def _get_pilot_presets_filtered(q: str) -> List[dict]:
     q_lower = q.lower()
-    return [p for p in _get_pilot_presets() if q_lower in p["name"].lower()][:6]
+    return [p for p in _get_pilot_presets() if q_lower in p["name"].lower() or q_lower in p["display"].lower()][:6]
 
 # ─────────────────────────────────────────────────────
 #  REVERSE GEOCODING  —  lat/lon → address name
