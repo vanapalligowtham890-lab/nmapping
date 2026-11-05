@@ -37,3 +37,4 @@ class TrafficViewModelTest {
         assertEquals(0.0, stateActive.currentSpeedKph, 0.001)
     }
 }
+

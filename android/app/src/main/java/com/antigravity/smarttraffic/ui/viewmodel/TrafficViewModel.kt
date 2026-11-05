@@ -140,3 +140,4 @@ class TrafficViewModel(application: Application) : AndroidViewModel(application)
         locationManager.stopLocationUpdates()
     }
 }
+

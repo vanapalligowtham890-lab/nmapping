@@ -343,3 +343,4 @@ class RoadNetworkService:
 
 # Global singleton
 road_network = RoadNetworkService()
+

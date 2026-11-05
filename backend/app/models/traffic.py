@@ -73,3 +73,4 @@ class IncidentReport(BaseModel):
     description: Optional[str] = None
     timestamp: datetime
     status: str = "unverified" # unverified, verified, dismissed
+

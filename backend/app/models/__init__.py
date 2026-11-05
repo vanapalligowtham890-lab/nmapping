@@ -21,3 +21,4 @@ from app.models.trips import (
     TripEndRequest,
     TripEndResponse,
 )
+

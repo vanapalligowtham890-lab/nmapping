@@ -48,3 +48,4 @@ def test_two_wheeler_allowed_on_suitable_residential_cross():
     res_bike = routing.find_routes(req_bike)
     # Two-wheeler has route options available
     assert len(res_bike.routes) >= 1
+

@@ -25,3 +25,4 @@ def test_stale_observations_expire_to_unknown():
 
     assert seg_expired.status == TrafficStatus.unknown
     assert seg_expired.confidence == ConfidenceLevel.unknown
+

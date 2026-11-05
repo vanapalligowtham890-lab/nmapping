@@ -74,3 +74,4 @@ class MainActivity : ComponentActivity() {
         viewModel.endTrip()
     }
 }
+

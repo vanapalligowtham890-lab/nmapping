@@ -62,3 +62,4 @@ class SessionManager:
         self.invalidated_tokens.clear()
 
 session_manager = SessionManager()
+

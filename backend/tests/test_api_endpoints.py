@@ -57,3 +57,56 @@ def test_traffic_segments_endpoint():
     segments = resp.json()
     assert len(segments) > 0
     assert any(s["segment_id"] == "seg_100ft_south" for s in segments)
+
+def test_ai_traffic_summary_endpoint():
+    resp = client.get("/v1/ai/traffic-summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "overall_level" in data
+    assert "pct_clear" in data
+    assert data["total_segments"] > 0
+
+def test_places_search_endpoint():
+    # Empty query returns pilot presets
+    resp = client.get("/v1/ai/places/search?q=")
+    assert resp.status_code == 200
+    places = resp.json()
+    assert len(places) > 0
+    assert any("100 Feet Road" in p["name"] or "Indiranagar" in p["display"] for p in places)
+
+def test_places_reverse_endpoint():
+    resp = client.get("/v1/ai/places/reverse?lat=12.9750&lon=77.6407")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "name" in data
+    assert "lat" in data
+    assert "lon" in data
+
+def test_ai_route_insight_endpoint():
+    req = {
+        "origin_name": "CMH Road",
+        "destination_name": "Sony World",
+        "vehicle_profile": "car"
+    }
+    resp = client.post("/v1/ai/route-insight", json=req)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "summary" in data
+    assert "smart_tip" in data
+    assert "safety_score" in data
+
+def test_websocket_traffic_stream():
+    with client.websocket_connect("/ws/traffic") as ws:
+        # Upon connect, immediate traffic snapshot is received
+        data = ws.receive_json()
+        assert data["type"] == "traffic_update"
+        assert "segments" in data
+        assert len(data["segments"]) > 0
+        assert "summary" in data
+
+        # Send ping, receive pong
+        ws.send_json({"type": "ping"})
+        pong = ws.receive_json()
+        assert pong["type"] == "pong"
+
+

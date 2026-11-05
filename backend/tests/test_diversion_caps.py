@@ -39,3 +39,4 @@ def test_detour_cap_prevents_new_jams():
     assert res2.selected_route_id == "route_primary"
     assert "Excluded by safety constraints" in res2.routes[1].recommendation_reason or "Detour cap reached" in res2.routes[1].recommendation_reason
     assert "Selected verified main corridor despite traffic slowdown" in res2.decision_rationale
+

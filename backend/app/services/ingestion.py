@@ -80,3 +80,4 @@ class TrafficIngestionService:
         )
 
 ingestion_service = TrafficIngestionService()
+

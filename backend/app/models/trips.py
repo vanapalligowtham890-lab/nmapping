@@ -20,3 +20,4 @@ class TripEndRequest(BaseModel):
 class TripEndResponse(BaseModel):
     status: str
     message: str
+

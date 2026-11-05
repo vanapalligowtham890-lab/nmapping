@@ -12,3 +12,4 @@ async def get_route_alternatives(request: RouteRequest):
     and checks detour diversion budgets to prevent shifting jams into neighborhoods.
     """
     return routing_engine.find_routes(request)
+

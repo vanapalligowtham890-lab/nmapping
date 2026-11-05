@@ -8,3 +8,4 @@ class SmartTrafficApp : Application() {
         // No 3rd-party ad SDKs, analytics SDKs, or session-replay trackers initialized!
     }
 }
+

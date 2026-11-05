@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.routers import traffic, routes, trips, admin
+from app.routers import traffic, routes, trips, admin, ai
+from app.ws.router import router as ws_router
 
 app = FastAPI(
     title="Smart Traffic Routing API",
@@ -26,6 +27,8 @@ app.include_router(traffic.router)
 app.include_router(routes.router)
 app.include_router(trips.router)
 app.include_router(admin.router)
+app.include_router(ai.router)
+app.include_router(ws_router)
 
 # Mount static directory for interactive Web Map & Simulation Dashboard
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -50,3 +53,4 @@ async def root():
             "/v1/admin/segments"
         ]
     }
+

@@ -70,3 +70,4 @@ def test_raw_gps_coordinates_never_retained_in_state():
     # Check that segment model does not retain any user raw track or session trace
     assert not hasattr(seg, "user_traces")
     assert not hasattr(seg, "raw_gps_points")
+

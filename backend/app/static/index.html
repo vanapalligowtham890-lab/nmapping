@@ -1,134 +1,293 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Traffic Routing — Bengaluru Pilot & Operations Dashboard</title>
-  <!-- Leaflet CSS -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Smart Traffic · Bengaluru</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="app-layout">
-    <!-- Sidebar Controls -->
-    <aside class="sidebar">
-      <header class="app-header">
-        <div class="badge-row">
-          <span class="badge privacy-badge">🔒 Privacy-First</span>
-          <span class="badge pilot-badge">Bengaluru Pilot</span>
-        </div>
-        <h1>Smart Traffic Routing</h1>
-        <p class="subtitle">Evidence-based congestion detection with safe detour diversion budgeting</p>
-      </header>
 
-      <!-- Privacy & Lifecycle Banner -->
-      <section class="card privacy-card">
-        <h3>🛡️ Privacy Architecture Guarantees</h3>
-        <ul>
-          <li><strong>Foreground-Only:</strong> Active solely while trip is running in app.</li>
-          <li><strong>Zero Background Service:</strong> Halts instantly on End Trip / Dismiss.</li>
-          <li><strong>Raw Coordinate Purging:</strong> Points matched in RAM and discarded immediately.</li>
-          <li><strong>Evidence Rule:</strong> &ge; 3 independent devices required to alert slowdown.</li>
-        </ul>
-      </section>
+  <!-- Mobile App Shell -->
+  <div class="app-shell">
 
-      <!-- Routing Controls -->
-      <section class="card">
-        <h3>🚗 Route Alternative Evaluator</h3>
-        <div class="form-group">
-          <label>Origin:</label>
-          <select id="originSelect">
-            <option value="12.9784,77.6408">CMH Road / 100 Feet Junction (Indiranagar)</option>
-            <option value="12.9610,77.6385">Domlur Flyover</option>
-          </select>
+    <!-- TOP HEADER BAR -->
+    <header class="top-bar">
+      <div class="top-bar-left">
+        <button class="icon-btn" id="btnMenu" aria-label="Menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="app-brand">
+          <span class="brand-dot"></span>
+          <span class="brand-name">SmartTraffic</span>
         </div>
-        <div class="form-group">
-          <label>Destination:</label>
-          <select id="destSelect">
-            <option value="12.9352,77.6245">Sony World Junction (Koramangala)</option>
-            <option value="12.9515,77.6360">Embassy Golf Links (EGL IRR)</option>
-          </select>
+      </div>
+      <div class="top-bar-right">
+        <div class="live-pill connected" id="livePill" title="Real-Time WebSocket Stream">
+          <span class="live-dot" id="liveDot"></span>
+          <span id="liveText">LIVE</span>
         </div>
-        <div class="form-group">
-          <label>Vehicle Profile:</label>
-          <select id="vehicleProfile">
-            <option value="car">Car / Four Wheeler</option>
-            <option value="two_wheeler">Two Wheeler (Bike / Scooter)</option>
-            <option value="auto_rickshaw">Auto Rickshaw</option>
-          </select>
-        </div>
-        <div class="form-group-checkbox">
-          <label>
-            <input type="checkbox" id="avoidResidential" checked>
-            Exclude narrow residential shortcuts for cars
-          </label>
-        </div>
-        <button id="btnFindRoutes" class="btn btn-primary">Find Safe Routes</button>
-      </section>
+        <div class="traffic-badge" id="trafficBadge">🟢 Light</div>
+      </div>
+    </header>
 
-      <!-- Route Evaluation Results -->
-      <section class="card" id="routeResultsCard" style="display:none;">
-        <h3>Selected Route & Decision</h3>
-        <div id="decisionRationale" class="rationale-box"></div>
-        <div id="routesList" class="routes-list"></div>
-      </section>
+    <!-- FULL-SCREEN MAP -->
+    <div class="map-wrap">
+      <div id="map"></div>
 
-      <!-- Traffic Simulation Scenarios -->
-      <section class="card">
-        <h3>⚡ Multi-Vehicle Simulation Scenarios</h3>
-        <p class="section-desc">Test real-time evidence evaluation, single-phone filtering, and detour caps.</p>
-        <div class="button-grid">
-          <button id="btnSimNormal" class="btn btn-outline">1. Normal Flow</button>
-          <button id="btnSimSingleGlitch" class="btn btn-warning">2. Single-Phone Glitch (1 Car)</button>
-          <button id="btnSimCongestion" class="btn btn-danger">3. Genuine Congestion (5 Cars)</button>
-          <button id="btnSimDetourCap" class="btn btn-purple">4. Detour Cap Saturation</button>
-        </div>
-        <button id="btnReset" class="btn btn-secondary" style="margin-top:10px;">Reset Pilot Network</button>
-      </section>
+      <!-- Floating AI insight bar over map -->
+      <div class="ai-bar" id="aiBar" style="display:none">
+        <div class="ai-bar-icon">✦</div>
+        <div class="ai-bar-text" id="aiBarText">AI insights loading…</div>
+      </div>
+    </div>
 
-      <!-- Mobile Companion Preview -->
-      <section class="card mobile-preview-card">
-        <h3>📱 Android Companion Screen</h3>
-        <div class="mobile-mockup">
-          <div class="mobile-notch"></div>
-          <div class="mobile-screen" id="mobileScreen">
-            <div class="mobile-status-bar">
-              <span class="location-pulse" id="locationPulse">● Location Sharing Active</span>
-              <span id="sessionTimer">00:04:12</span>
+    <!-- BOTTOM SHEET (Slide-up panel) -->
+    <div class="bottom-sheet" id="bottomSheet">
+      <div class="sheet-handle" id="sheetHandle"></div>
+
+      <!-- SEARCH PANEL -->
+      <div class="sheet-panel" id="panelSearch">
+        <!-- Place Search: Origin -->
+        <div class="search-row">
+          <div class="search-dot origin-dot"></div>
+          <div class="search-field-wrap" id="originWrap">
+            <input class="search-input has-loc" id="originInput" placeholder="From — your starting point" autocomplete="off" />
+            <div class="field-actions">
+              <button type="button" class="loc-btn" id="btnMyLocation" title="Use my current GPS location">📍 GPS</button>
+              <button type="button" class="clear-btn" id="originClear" style="display:none">✕</button>
             </div>
-            <div class="mobile-trip-card">
-              <h4 id="mobileRouteTitle">To Sony World, Koramangala</h4>
-              <p id="mobileEta">ETA: 14 mins • 4.8 km</p>
-              <div class="instruction-banner" id="mobileInstruction">
-                ➔ In 200m, turn left onto 100 Feet Road
-              </div>
-            </div>
-            <div class="mobile-actions">
-              <button id="btnMobileEndTrip" class="btn-mobile btn-mobile-end">End Trip (Stop Sharing)</button>
-              <button id="btnMobileReport" class="btn-mobile btn-mobile-report">Report Issue</button>
-            </div>
+            <div class="search-dropdown" id="originDropdown"></div>
           </div>
         </div>
-      </section>
+
+        <div class="search-divider">
+          <div class="divider-line"></div>
+          <button class="swap-btn" id="swapBtn" title="Swap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+          </button>
+        </div>
+
+        <!-- Place Search: Destination -->
+        <div class="search-row">
+          <div class="search-dot dest-dot"></div>
+          <div class="search-field-wrap" id="destWrap">
+            <input class="search-input" id="destInput" placeholder="To — destination or tap on map" autocomplete="off" />
+            <div class="field-actions">
+              <button type="button" class="clear-btn" id="destClear" style="display:none">✕</button>
+            </div>
+            <div class="search-dropdown" id="destDropdown"></div>
+          </div>
+        </div>
+
+        <div class="map-tap-hint">
+          <span>💡 Tap or click anywhere on the map to set Origin or Destination</span>
+        </div>
+
+        <!-- Vehicle Selector -->
+        <div class="vehicle-row">
+          <button class="vehicle-btn active" data-v="car">🚗 Car</button>
+          <button class="vehicle-btn" data-v="two_wheeler">🛵 2-Wheeler</button>
+          <button class="vehicle-btn" data-v="auto_rickshaw">🛺 Auto</button>
+        </div>
+
+        <!-- Options Row -->
+        <div class="options-row">
+          <label class="toggle-label">
+            <span>Avoid residential shortcuts</span>
+            <input type="checkbox" id="avoidResidential" checked class="toggle-input" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+
+        <!-- CTA -->
+        <button class="cta-btn" id="btnFindRoutes">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          Find Best Routes
+        </button>
+
+        <!-- Quick Locations -->
+        <div class="quick-places">
+          <p class="quick-label">Popular in Bengaluru Pilot Area</p>
+          <div class="quick-chips" id="quickChips"></div>
+        </div>
+      </div>
+
+      <!-- ROUTES PANEL (shown after search) -->
+      <div class="sheet-panel hidden" id="panelRoutes">
+        <button class="back-btn" id="btnBack">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m15 18-6-6 6-6"/></svg>
+          Back
+        </button>
+
+        <!-- AI Summary Card -->
+        <div class="ai-insight-card" id="aiInsightCard">
+          <div class="ai-card-header">
+            <span class="ai-sparkle">✦ AI</span>
+            <span class="ai-label">Smart Analysis</span>
+            <div class="ai-loading-dots" id="aiLoadingDots"><span></span><span></span><span></span></div>
+          </div>
+          <p class="ai-summary" id="aiSummary">Analysing your route…</p>
+          <div class="ai-metrics" id="aiMetrics" style="display:none">
+            <div class="ai-metric">
+              <span class="ai-metric-icon">🛡</span>
+              <div>
+                <span class="ai-metric-label">Safety</span>
+                <span class="ai-metric-val" id="aiSafetyScore">-</span>
+              </div>
+            </div>
+            <div class="ai-metric">
+              <span class="ai-metric-icon">⏱</span>
+              <div>
+                <span class="ai-metric-label">ETA</span>
+                <span class="ai-metric-val" id="aiEta">-</span>
+              </div>
+            </div>
+            <div class="ai-metric">
+              <span class="ai-metric-icon">🔮</span>
+              <div>
+                <span class="ai-metric-label">Forecast</span>
+                <span class="ai-metric-val" id="aiForecast">-</span>
+              </div>
+            </div>
+          </div>
+          <div class="ai-tip-box" id="aiTipBox" style="display:none">
+            <span class="ai-tip-icon">💡</span>
+            <span id="aiTip">-</span>
+          </div>
+        </div>
+
+        <!-- Route Cards -->
+        <div id="routeCards" class="route-cards-list"></div>
+
+        <!-- Start Trip -->
+        <button class="cta-btn cta-green" id="btnStartTrip" style="display:none">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          Start Trip — Activate Location
+        </button>
+      </div>
+
+      <!-- ACTIVE TRIP PANEL -->
+      <div class="sheet-panel hidden" id="panelTrip">
+        <!-- Privacy & Telemetry Indicator -->
+        <div class="privacy-banner" id="privacyBanner">
+          <div class="privacy-pulse"></div>
+          <span id="privacyBannerText">Foreground GPS active · sharing speed data only</span>
+        </div>
+
+        <div class="gps-badge" id="gpsBadge">
+          <span id="gpsBadgeText">📡 GPS Stream: High Accuracy Live</span>
+        </div>
+
+        <!-- Current Instruction -->
+        <div class="nav-instruction" id="navInstruction">
+          <div class="nav-arrow">➔</div>
+          <div class="nav-text">
+            <p class="nav-primary" id="navPrimary">Follow the route</p>
+            <p class="nav-secondary" id="navSecondary">on 100 Feet Road</p>
+          </div>
+          <div class="nav-dist" id="navDist">—</div>
+        </div>
+
+        <!-- Trip Stats Row -->
+        <div class="trip-stats">
+          <div class="trip-stat">
+            <span class="stat-val" id="statSpeed">0</span>
+            <span class="stat-unit">km/h</span>
+            <span class="stat-label">Speed</span>
+          </div>
+          <div class="trip-stat-divider"></div>
+          <div class="trip-stat">
+            <span class="stat-val" id="statDist">—</span>
+            <span class="stat-unit">km</span>
+            <span class="stat-label">Left</span>
+          </div>
+          <div class="trip-stat-divider"></div>
+          <div class="trip-stat">
+            <span class="stat-val" id="statTime">—</span>
+            <span class="stat-unit">min</span>
+            <span class="stat-label">ETA</span>
+          </div>
+        </div>
+
+        <!-- Trip Actions -->
+        <div class="trip-actions">
+          <button class="trip-btn-secondary" id="btnReportIssue">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+            Report
+          </button>
+          <button class="trip-btn-end" id="btnEndTrip">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            End Trip
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- SIDE DRAWER (Simulation + Admin) -->
+    <div class="drawer-overlay" id="drawerOverlay"></div>
+    <aside class="side-drawer" id="sideDrawer">
+      <div class="drawer-header">
+        <span class="brand-name">SmartTraffic</span>
+        <button class="icon-btn" id="btnCloseDrawer">✕</button>
+      </div>
+
+      <div class="drawer-section">
+        <p class="drawer-section-title">🧪 Simulation Scenarios</p>
+        <button class="sim-btn" data-sim="normal">🟢 Normal Flow (4 cars)</button>
+        <button class="sim-btn" data-sim="single_glitch">🔵 Single-Phone Glitch (1 car)</button>
+        <button class="sim-btn" data-sim="congestion">🔴 Genuine Congestion (5 cars)</button>
+        <button class="sim-btn" data-sim="detour_cap">🟣 Detour Cap Saturation</button>
+        <button class="sim-btn reset" id="btnReset">🔄 Reset Pilot Network</button>
+      </div>
+
+      <div class="drawer-section">
+        <p class="drawer-section-title">📊 Live Pilot Status</p>
+        <div class="status-grid" id="statusGrid">
+          <div class="status-loading">Loading…</div>
+        </div>
+      </div>
+
+      <div class="drawer-section">
+        <p class="drawer-section-title">🔒 Privacy Guarantees</p>
+        <ul class="privacy-list">
+          <li>✅ Foreground-only GPS</li>
+          <li>✅ Zero background tracking</li>
+          <li>✅ Raw coordinates purged instantly</li>
+          <li>✅ ≥3 devices to confirm congestion</li>
+          <li>✅ No ad/analytics SDKs</li>
+        </ul>
+      </div>
+
+      <div class="drawer-footer">
+        <a href="/docs" class="drawer-link">API Documentation</a>
+      </div>
     </aside>
 
-    <!-- Interactive Map Display -->
-    <main class="map-container">
-      <div id="map"></div>
-      <!-- Map Legend & Stats Overlay -->
-      <div class="map-overlay-legend">
-        <h4>Segment Traffic Status</h4>
-        <div class="legend-item"><span class="legend-color normal"></span> Normal (&gt; 70% baseline)</div>
-        <div class="legend-item"><span class="legend-color slowing"></span> Slowing (45% - 70%)</div>
-        <div class="legend-item"><span class="legend-color congested"></span> Congested (&lt; 45% + &ge;3 devices)</div>
-        <div class="legend-item"><span class="legend-color residential"></span> Residential (Cut-through restricted)</div>
-        <div class="legend-item"><span class="legend-color closed"></span> Closed / Blocked</div>
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Report Incident Modal -->
+    <div class="modal-overlay hidden" id="reportModal">
+      <div class="modal-card">
+        <h3 class="modal-title">Report an Issue</h3>
+        <div class="incident-grid" id="incidentGrid">
+          <button class="incident-btn" data-type="waterlogging">💧 Waterlogging</button>
+          <button class="incident-btn" data-type="pothole">🕳 Pothole</button>
+          <button class="incident-btn" data-type="accident">🚨 Accident</button>
+          <button class="incident-btn" data-type="closure">🚧 Closure</button>
+          <button class="incident-btn" data-type="heavy_traffic">🐢 Heavy Traffic</button>
+          <button class="incident-btn" data-type="signal_issue">🚦 Signal Issue</button>
+        </div>
+        <button class="modal-cancel" id="cancelReport">Cancel</button>
       </div>
-    </main>
+    </div>
+
   </div>
 
-  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="/static/app.js"></script>
 </body>

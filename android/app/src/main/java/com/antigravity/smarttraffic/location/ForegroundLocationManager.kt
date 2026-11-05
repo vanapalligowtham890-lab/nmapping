@@ -97,3 +97,4 @@ class ForegroundLocationManager(private val context: Context) {
         locationCallback = null
     }
 }
+

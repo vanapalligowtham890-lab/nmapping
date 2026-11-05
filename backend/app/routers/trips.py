@@ -50,3 +50,4 @@ async def end_trip(request: TripEndRequest):
         status="terminated",
         message="Trip session invalidated. Location collection stopped; diversion quota released."
     )
+

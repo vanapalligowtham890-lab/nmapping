@@ -67,3 +67,4 @@ def test_persistent_slowdown_escalates_to_congested():
 
     assert seg.status == TrafficStatus.congested
     assert seg.confidence == ConfidenceLevel.high
+

@@ -43,3 +43,4 @@ class RouteResponse(BaseModel):
     routes: List[RouteCandidate]
     decision_rationale: str
     active_diversions_summary: Dict[str, int]
+

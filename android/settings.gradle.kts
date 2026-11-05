@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "SmartTraffic"
 include(":app")
+

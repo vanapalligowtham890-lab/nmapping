@@ -43,3 +43,4 @@ interface TrafficApiService {
         @Query("description") description: String? = null
     ): Response<Unit>
 }
+
