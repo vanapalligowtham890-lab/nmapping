@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Smart Traffic</string>
+    <string name="consent_title">Privacy &amp; Location Consent</string>
+</resources>

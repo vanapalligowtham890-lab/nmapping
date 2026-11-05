@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Traffic Routing — Bengaluru Pilot & Operations Dashboard</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar Controls -->
+    <aside class="sidebar">
+      <header class="app-header">
+        <div class="badge-row">
+          <span class="badge privacy-badge">🔒 Privacy-First</span>
+          <span class="badge pilot-badge">Bengaluru Pilot</span>
+        </div>
+        <h1>Smart Traffic Routing</h1>
+        <p class="subtitle">Evidence-based congestion detection with safe detour diversion budgeting</p>
+      </header>
+
+      <!-- Privacy & Lifecycle Banner -->
+      <section class="card privacy-card">
+        <h3>🛡️ Privacy Architecture Guarantees</h3>
+        <ul>
+          <li><strong>Foreground-Only:</strong> Active solely while trip is running in app.</li>
+          <li><strong>Zero Background Service:</strong> Halts instantly on End Trip / Dismiss.</li>
+          <li><strong>Raw Coordinate Purging:</strong> Points matched in RAM and discarded immediately.</li>
+          <li><strong>Evidence Rule:</strong> &ge; 3 independent devices required to alert slowdown.</li>
+        </ul>
+      </section>
+
+      <!-- Routing Controls -->
+      <section class="card">
+        <h3>🚗 Route Alternative Evaluator</h3>
+        <div class="form-group">
+          <label>Origin:</label>
+          <select id="originSelect">
+            <option value="12.9784,77.6408">CMH Road / 100 Feet Junction (Indiranagar)</option>
+            <option value="12.9610,77.6385">Domlur Flyover</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Destination:</label>
+          <select id="destSelect">
+            <option value="12.9352,77.6245">Sony World Junction (Koramangala)</option>
+            <option value="12.9515,77.6360">Embassy Golf Links (EGL IRR)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Vehicle Profile:</label>
+          <select id="vehicleProfile">
+            <option value="car">Car / Four Wheeler</option>
+            <option value="two_wheeler">Two Wheeler (Bike / Scooter)</option>
+            <option value="auto_rickshaw">Auto Rickshaw</option>
+          </select>
+        </div>
+        <div class="form-group-checkbox">
+          <label>
+            <input type="checkbox" id="avoidResidential" checked>
+            Exclude narrow residential shortcuts for cars
+          </label>
+        </div>
+        <button id="btnFindRoutes" class="btn btn-primary">Find Safe Routes</button>
+      </section>
+
+      <!-- Route Evaluation Results -->
+      <section class="card" id="routeResultsCard" style="display:none;">
+        <h3>Selected Route & Decision</h3>
+        <div id="decisionRationale" class="rationale-box"></div>
+        <div id="routesList" class="routes-list"></div>
+      </section>
+
+      <!-- Traffic Simulation Scenarios -->
+      <section class="card">
+        <h3>⚡ Multi-Vehicle Simulation Scenarios</h3>
+        <p class="section-desc">Test real-time evidence evaluation, single-phone filtering, and detour caps.</p>
+        <div class="button-grid">
+          <button id="btnSimNormal" class="btn btn-outline">1. Normal Flow</button>
+          <button id="btnSimSingleGlitch" class="btn btn-warning">2. Single-Phone Glitch (1 Car)</button>
+          <button id="btnSimCongestion" class="btn btn-danger">3. Genuine Congestion (5 Cars)</button>
+          <button id="btnSimDetourCap" class="btn btn-purple">4. Detour Cap Saturation</button>
+        </div>
+        <button id="btnReset" class="btn btn-secondary" style="margin-top:10px;">Reset Pilot Network</button>
+      </section>
+
+      <!-- Mobile Companion Preview -->
+      <section class="card mobile-preview-card">
+        <h3>📱 Android Companion Screen</h3>
+        <div class="mobile-mockup">
+          <div class="mobile-notch"></div>
+          <div class="mobile-screen" id="mobileScreen">
+            <div class="mobile-status-bar">
+              <span class="location-pulse" id="locationPulse">● Location Sharing Active</span>
+              <span id="sessionTimer">00:04:12</span>
+            </div>
+            <div class="mobile-trip-card">
+              <h4 id="mobileRouteTitle">To Sony World, Koramangala</h4>
+              <p id="mobileEta">ETA: 14 mins • 4.8 km</p>
+              <div class="instruction-banner" id="mobileInstruction">
+                ➔ In 200m, turn left onto 100 Feet Road
+              </div>
+            </div>
+            <div class="mobile-actions">
+              <button id="btnMobileEndTrip" class="btn-mobile btn-mobile-end">End Trip (Stop Sharing)</button>
+              <button id="btnMobileReport" class="btn-mobile btn-mobile-report">Report Issue</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- Interactive Map Display -->
+    <main class="map-container">
+      <div id="map"></div>
+      <!-- Map Legend & Stats Overlay -->
+      <div class="map-overlay-legend">
+        <h4>Segment Traffic Status</h4>
+        <div class="legend-item"><span class="legend-color normal"></span> Normal (&gt; 70% baseline)</div>
+        <div class="legend-item"><span class="legend-color slowing"></span> Slowing (45% - 70%)</div>
+        <div class="legend-item"><span class="legend-color congested"></span> Congested (&lt; 45% + &ge;3 devices)</div>
+        <div class="legend-item"><span class="legend-color residential"></span> Residential (Cut-through restricted)</div>
+        <div class="legend-item"><span class="legend-color closed"></span> Closed / Blocked</div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
