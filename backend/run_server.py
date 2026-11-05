@@ -9,10 +9,11 @@ if backend_dir not in sys.path:
 import uvicorn
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
     print("================================================================")
     print("Starting Smart Traffic Routing API & Live Operations Dashboard...")
-    print("API Documentation: http://127.0.0.1:8000/docs")
-    print("Live Web Dashboard: http://127.0.0.1:8000/")
+    print(f"API Documentation: http://127.0.0.1:{port}/docs")
+    print(f"Live Web Dashboard: http://127.0.0.1:{port}/")
     print("================================================================")
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=False)
 
