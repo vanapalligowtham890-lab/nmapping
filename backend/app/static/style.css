@@ -111,16 +111,19 @@ html, body {
 .brand-dot {
   width: 10px;
   height: 10px;
-  background: var(--primary);
+  background: linear-gradient(135deg, #1A73E8, #7C4DFF);
   border-radius: 50%;
-  box-shadow: 0 0 0 3px rgba(26,115,232,0.2);
+  box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.25);
+  animation: livePulse 2s infinite;
 }
 .brand-name {
   font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 17px;
-  color: var(--text);
-  letter-spacing: -0.3px;
+  font-weight: 800;
+  font-size: 18px;
+  background: linear-gradient(135deg, #1A73E8 0%, #7C4DFF 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.4px;
 }
 
 .live-pill {
@@ -843,26 +846,65 @@ html, body {
 
 /* ==================== QUICK PLACES ==================== */
 .quick-places { margin-top: 16px; }
-.quick-label { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+.quick-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .quick-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .quick-chip {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 12px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
+  padding: 7px 14px;
   border-radius: var(--radius-pill);
   font-size: 12px;
-  font-weight: 500;
-  color: var(--text2);
+  font-weight: 600;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: all 0.2s var(--ease-spring);
+  border: 1.5px solid transparent;
 }
 .quick-chip:hover, .quick-chip:active {
-  background: var(--primary-light);
-  border-color: var(--primary);
-  color: var(--primary);
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.quick-chip.chip-demo {
+  background: linear-gradient(135deg, #1A73E8 0%, #7C4DFF 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(26, 115, 232, 0.35);
+  font-weight: 700;
+  animation: livePulse 2.5s infinite;
+}
+.quick-chip.chip-transit {
+  background: #E0F2FE;
+  color: #0369A1;
+  border-color: #BAE6FD;
+}
+.quick-chip.chip-landmark {
+  background: #FEF3C7;
+  color: #B45309;
+  border-color: #FDE68A;
+}
+.quick-chip.chip-city {
+  background: #D1FAE5;
+  color: #047857;
+  border-color: #A7F3D0;
+}
+.quick-chip.chip-area {
+  background: #F3E8FF;
+  color: #6D28D9;
+  border-color: #DDD6FE;
+}
+.quick-chip.chip-road {
+  background: #F1F5F9;
+  color: #334155;
+  border-color: #CBD5E1;
 }
 
 /* ==================== ROUTES PANEL ==================== */

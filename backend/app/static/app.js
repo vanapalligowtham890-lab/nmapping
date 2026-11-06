@@ -38,6 +38,7 @@ const state = {
 
 // Rich nationwide presets & smart suggestions
 const POPULAR_HUBS = [
+  { name: '⚡ Try Live Demo Route (Indiranagar → BLR Airport)', isSampleRoute: true, type: 'demo', display: 'Click to watch animated road drawing, traffic pulse & AI insights' },
   { name: '📍 My Current Location (GPS)', isCurrentLoc: true, type: 'place', display: 'Use device GPS sensor or network location' },
   { name: 'Kakinada Town Junction', lat: 16.9673, lon: 82.2335, type: 'transit', display: 'Railway Station Road, Kakinada, Andhra Pradesh' },
   { name: 'Kakinada Beach Road', lat: 16.9891, lon: 82.2475, type: 'landmark', display: 'NTR Beach Road, Kakinada, Andhra Pradesh' },
@@ -55,7 +56,7 @@ const POPULAR_HUBS = [
 ];
 
 const TYPE_ICONS = {
-  junction: '🔀', road: '🛣️', landmark: '🏛️', area: '📍', transit: '🚆',
+  demo: '⚡', junction: '🔀', road: '🛣️', landmark: '🏛️', area: '📍', transit: '🚆',
   place: '🏙️', city: '🏙️', airport: '✈️', hospital: '🏥', mall: '🛍️'
 };
 
@@ -67,39 +68,47 @@ const MANEUVER_ICONS = {
 
 // ──────────────────────────────────────────────
 //  MULTI-TYPE MAP PROVIDERS & 3D RELIEF
-//  100% Free Public GIS Tiles — Zero Watermarks, No API Key Required
+//  Ultra High-Res Max Zoom (Doorstep Level) — Zero Watermarks, No Missing Tiles
 // ──────────────────────────────────────────────
 const TILE_PROVIDERS = {
-  voyager: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19,
-    attribution: '© Esri, HERE, Garmin, USGS, OpenStreetMap'
+  voyager: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxNativeZoom: 19,
+    maxZoom: 20,
+    attribution: '© OpenStreetMap contributors'
   }),
   satellite: L.layerGroup([
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
+      maxNativeZoom: 18,
+      maxZoom: 20,
       attribution: '© Esri, Maxar, Earthstar Geographics'
     }),
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
-      opacity: 0.9
+      maxNativeZoom: 18,
+      maxZoom: 20,
+      opacity: 0.95
     }),
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
+      maxNativeZoom: 18,
+      maxZoom: 20,
       opacity: 0.95
     })
   ]),
-  terrain: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19,
-    attribution: '© Esri, Intermap, USGS, OpenStreetMap'
+  terrain: L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    subdomains: ['a', 'b', 'c'],
+    maxNativeZoom: 18,
+    maxZoom: 20,
+    attribution: '© OpenStreetMap France, © OpenStreetMap'
   }),
   dark: L.layerGroup([
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 16,
+      maxNativeZoom: 15,
+      maxZoom: 20,
       attribution: '© Esri, HERE, Garmin, OpenStreetMap'
     }),
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 16,
-      opacity: 0.9
+      maxNativeZoom: 15,
+      maxZoom: 20,
+      opacity: 0.95
     })
   ])
 };
@@ -230,7 +239,9 @@ document.addEventListener('DOMContentLoaded', () => {
 function initMap() {
   state.map = L.map('map', {
     zoomControl: false,
-    attributionControl: true
+    attributionControl: true,
+    maxZoom: 20,
+    minZoom: 3
   }).setView([12.9610, 77.6385], 13);
 
   // Initialize selected layer
@@ -1483,9 +1494,33 @@ function initQuickChips() {
 
   POPULAR_HUBS.forEach(place => {
     const chip = document.createElement('button');
-    chip.className = 'quick-chip';
-    chip.innerHTML = `${place.isCurrentLoc ? '📍' : (TYPE_ICONS[place.type] || '📍')} ${place.name.replace('📍 ', '')}`;
+    const chipClass = place.isSampleRoute ? 'quick-chip chip-demo' :
+                      place.type === 'transit' ? 'quick-chip chip-transit' :
+                      place.type === 'landmark' ? 'quick-chip chip-landmark' :
+                      place.type === 'city' ? 'quick-chip chip-city' :
+                      place.type === 'area' ? 'quick-chip chip-area' : 'quick-chip chip-road';
+    chip.className = chipClass;
+    chip.innerHTML = `${place.isSampleRoute ? '⚡' : (place.isCurrentLoc ? '📍' : (TYPE_ICONS[place.type] || '📍'))} ${place.name.replace('📍 ', '').replace('⚡ ', '')}`;
+
     chip.addEventListener('click', () => {
+      if (place.isSampleRoute) {
+        // Run full interactive demonstration
+        const originPoint = { name: 'Indiranagar 100 Feet Road', lat: 12.9750, lon: 77.6407 };
+        const destPoint = { name: 'Kempegowda International Airport (BLR)', lat: 13.1986, lon: 77.7066 };
+        state.origin = originPoint;
+        state.dest = destPoint;
+        document.getElementById('originInput').value = originPoint.name;
+        document.getElementById('destInput').value = destPoint.name;
+        document.getElementById('originClear').style.display = '';
+        document.getElementById('destClear').style.display = '';
+        setMarker('origin', originPoint.lat, originPoint.lon, originPoint.name, true);
+        setMarker('dest', destPoint.lat, destPoint.lon, destPoint.name, false);
+        fitBothMarkers();
+        showToast('🚀 Calculating live route with real road curves & animated drawing…', 'info');
+        setTimeout(() => doFindRoutes(false), 250);
+        return;
+      }
+
       if (place.isCurrentLoc) {
         acquireUserLocation(true);
         return;
@@ -1496,7 +1531,7 @@ function initQuickChips() {
         document.getElementById('originInput').value = place.name;
         document.getElementById('originClear').style.display = '';
         setMarker('origin', place.lat, place.lon, place.name, true);
-        state.map.flyTo([place.lat, place.lon], 13);
+        state.map.flyTo([place.lat, place.lon], 14);
       } else if (!state.dest) {
         state.dest = place;
         document.getElementById('destInput').value = place.name;
