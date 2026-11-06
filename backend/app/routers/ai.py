@@ -30,84 +30,148 @@ class PlaceResult(BaseModel):
     display: str
 
 # ─────────────────────────────────────────────────────
-#  REAL PLACE SEARCH  —  OpenStreetMap Nominatim
-#  Works for ANY location in India, completely free.
+#  REAL PLACE SEARCH  —  Hybrid Multi-Provider Geocoding
+#  Photon (Komoot) + OpenStreetMap Nominatim
+#  Instant worldwide & India autocomplete, zero rate-limit, GPS-biased.
 # ─────────────────────────────────────────────────────
+_SEARCH_CACHE = {}
+
 @router.get("/places/search")
-async def search_places(q: str = "", limit: int = 10) -> List[dict]:
+async def search_places(
+    q: str = "",
+    limit: int = 10,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None
+) -> List[dict]:
     """
-    Real geocoding search using OpenStreetMap Nominatim.
-    Returns actual lat/lon for any location typed by user across India.
+    High-speed, comprehensive place search powered by Photon (OSM) with Nominatim fallback.
+    Supports city names, street names, landmarks, POIs, airports, railway stations across India and worldwide.
     """
     cleaned = (q or "").strip()
     if not cleaned or len(cleaned) < 2:
         return _get_pilot_presets()[:8]
 
+    cache_key = f"{cleaned.lower()}_{round(lat, 2) if lat else None}_{round(lon, 2) if lon else None}_{limit}"
+    if cache_key in _SEARCH_CACHE:
+        return _SEARCH_CACHE[cache_key]
+
+    results = []
+
+    # 1. Primary: Photon API (Fast, no strict rate limit, supports lat/lon proximity bias)
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        photon_params = {
+            "q": cleaned,
+            "limit": limit,
+            "lang": "en"
+        }
+        if lat is not None and lon is not None:
+            photon_params["lat"] = lat
+            photon_params["lon"] = lon
+
+        async with httpx.AsyncClient(timeout=4.0) as client:
             resp = await client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={
-                    "q": cleaned,
-                    "format": "json",
-                    "limit": limit,
-                    "addressdetails": 1,
-                    "countrycodes": "in",
-                    "accept-language": "en"
-                },
+                "https://photon.komoot.io/api/",
+                params=photon_params,
                 headers={"User-Agent": "SmartTrafficNavigationPlatform/2.0"}
             )
-            data = resp.json()
-            results = []
-            for item in data:
-                display_name = item.get("display_name", "")
-                parts = [p.strip() for p in display_name.split(",") if p.strip()]
-                # Short title: 1 or 2 parts
-                short_title = ", ".join(parts[:2]) if len(parts) >= 2 else display_name
-                # Full subtitle: clean address
-                full_sub = ", ".join(parts[:5]) if len(parts) >= 3 else display_name
+            if resp.status_code == 200:
+                data = resp.json()
+                features = data.get("features", [])
+                for feat in features:
+                    props = feat.get("properties", {})
+                    coords = feat.get("geometry", {}).get("coordinates", [])
+                    if len(coords) < 2:
+                        continue
+                    p_lon, p_lat = float(coords[0]), float(coords[1])
 
-                t = item.get("type", "place")
-                results.append({
-                    "name": short_title,
-                    "lat": float(item["lat"]),
-                    "lon": float(item["lon"]),
-                    "type": t,
-                    "display": full_sub
-                })
+                    name = props.get("name") or props.get("street") or props.get("city") or cleaned.title()
+                    
+                    # Construct clean hierarchy
+                    locality_parts = [
+                        props.get("street"),
+                        props.get("district") or props.get("locality"),
+                        props.get("city"),
+                        props.get("state"),
+                        props.get("country")
+                    ]
+                    display = ", ".join([p for p in locality_parts if p and p != name])
+                    if not display:
+                        display = props.get("country", "India")
 
-            if results:
-                return results
+                    osm_val = props.get("osm_value") or props.get("osm_key") or props.get("type", "place")
+                    ptype = "place"
+                    if osm_val in ["aeroway", "aerodrome", "airport"]:
+                        ptype = "transit"
+                    elif osm_val in ["station", "railway", "train_station", "halt"]:
+                        ptype = "transit"
+                    elif osm_val in ["hospital", "clinic", "doctors"]:
+                        ptype = "landmark"
+                    elif osm_val in ["mall", "supermarket", "marketplace"]:
+                        ptype = "landmark"
+                    elif osm_val in ["motorway", "trunk", "primary", "secondary", "highway"]:
+                        ptype = "road"
+                    elif osm_val in ["city", "town", "village", "suburb"]:
+                        ptype = "city"
 
-            # If no results and query was simple, try with Karnataka/Bangalore context as fallback
-            if len(cleaned.split()) <= 2:
-                resp2 = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={
-                        "q": f"{cleaned}, Bangalore",
-                        "format": "json",
-                        "limit": 5,
-                        "addressdetails": 1,
-                        "countrycodes": "in",
-                        "accept-language": "en"
-                    },
-                    headers={"User-Agent": "SmartTrafficNavigationPlatform/2.0"}
-                )
-                data2 = resp2.json()
-                for item in data2:
+                    results.append({
+                        "name": name,
+                        "lat": p_lat,
+                        "lon": p_lon,
+                        "type": ptype,
+                        "display": f"{name}, {display}" if display else name
+                    })
+
+                if results:
+                    _SEARCH_CACHE[cache_key] = results[:limit]
+                    return results[:limit]
+    except Exception:
+        pass
+
+    # 2. Secondary: OpenStreetMap Nominatim
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            nom_params = {
+                "q": cleaned,
+                "format": "json",
+                "limit": limit,
+                "addressdetails": 1,
+                "accept-language": "en"
+            }
+            if lat is not None and lon is not None:
+                # viewbox around user's location
+                d = 0.8
+                nom_params["viewbox"] = f"{lon-d},{lat+d},{lon+d},{lat-d}"
+
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params=nom_params,
+                headers={"User-Agent": "SmartTrafficNavigationPlatform/2.0"}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data:
                     display_name = item.get("display_name", "")
                     parts = [p.strip() for p in display_name.split(",") if p.strip()]
+                    short_title = ", ".join(parts[:2]) if len(parts) >= 2 else display_name
+                    full_sub = ", ".join(parts[:5]) if len(parts) >= 3 else display_name
+
                     results.append({
-                        "name": ", ".join(parts[:2]),
+                        "name": short_title,
                         "lat": float(item["lat"]),
                         "lon": float(item["lon"]),
                         "type": item.get("type", "place"),
-                        "display": display_name
+                        "display": full_sub
                     })
 
-            return results if results else _get_pilot_presets_filtered(cleaned)
+                if results:
+                    _SEARCH_CACHE[cache_key] = results[:limit]
+                    return results[:limit]
     except Exception:
-        return _get_pilot_presets_filtered(cleaned)
+        pass
+
+    # 3. Fallback: Filtered Pilot Presets
+    presets = _get_pilot_presets_filtered(cleaned)
+    return presets if presets else _get_pilot_presets()[:limit]
 
 def _get_pilot_presets():
     return [
@@ -119,43 +183,94 @@ def _get_pilot_presets():
         {"name": "Embassy Golf Links (EGL)", "lat": 12.9515, "lon": 77.6360, "type": "landmark", "display": "Embassy Golf Links Business Park, IRR, Bengaluru"},
         {"name": "MG Road Metro Station", "lat": 12.9756, "lon": 77.6066, "type": "transit", "display": "Mahatma Gandhi Road, Bengaluru, Karnataka"},
         {"name": "Whitefield ITPL", "lat": 12.9863, "lon": 77.7381, "type": "area", "display": "International Tech Park Bangalore (ITPL), Whitefield"},
+        {"name": "Kakinada", "lat": 16.9891, "lon": 82.2475, "type": "place", "display": "Kakinada, Andhra Pradesh, India"},
+        {"name": "Rajahmundry", "lat": 17.0005, "lon": 81.8040, "type": "place", "display": "Rajahmundry, East Godavari, Andhra Pradesh"},
+        {"name": "Vijayawada", "lat": 16.5062, "lon": 80.6480, "type": "place", "display": "Vijayawada, Andhra Pradesh, India"},
+        {"name": "Hyderabad", "lat": 17.3850, "lon": 78.4867, "type": "place", "display": "Hyderabad, Telangana, India"},
         {"name": "Solapur", "lat": 17.6599, "lon": 75.9064, "type": "place", "display": "Solapur, Maharashtra, India"},
         {"name": "Mysuru (Mysore)", "lat": 12.2958, "lon": 76.6394, "type": "place", "display": "Mysuru, Karnataka, India"},
     ]
 
 def _get_pilot_presets_filtered(q: str) -> List[dict]:
     q_lower = q.lower()
-    return [p for p in _get_pilot_presets() if q_lower in p["name"].lower() or q_lower in p["display"].lower()][:6]
+    return [p for p in _get_pilot_presets() if q_lower in p["name"].lower() or q_lower in p["display"].lower()][:8]
 
 # ─────────────────────────────────────────────────────
 #  REVERSE GEOCODING  —  lat/lon → address name
+#  Hybrid Photon + Nominatim
 # ─────────────────────────────────────────────────────
+_REVERSE_CACHE = {}
+
 @router.get("/places/reverse")
 async def reverse_geocode(lat: float, lon: float) -> dict:
-    """Convert GPS coordinates to a human-readable place name."""
+    """Convert GPS coordinates to a human-readable place name using Photon and Nominatim."""
+    cache_key = f"{round(lat, 4)}_{round(lon, 4)}"
+    if cache_key in _REVERSE_CACHE:
+        return _REVERSE_CACHE[cache_key]
+
+    # 1. Primary: Photon reverse
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
+        async with httpx.AsyncClient(timeout=3.5) as client:
+            resp = await client.get(
+                "https://photon.komoot.io/reverse",
+                params={"lat": lat, "lon": lon},
+                headers={"User-Agent": "SmartTrafficNavigationPlatform/2.0"}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                feats = data.get("features", [])
+                if feats:
+                    props = feats[0].get("properties", {})
+                    name = props.get("name") or props.get("street")
+                    loc_parts = [
+                        props.get("street"),
+                        props.get("district") or props.get("locality"),
+                        props.get("city") or props.get("county"),
+                        props.get("state")
+                    ]
+                    full = ", ".join([p for p in loc_parts if p])
+                    final_name = name or props.get("city") or props.get("locality") or f"{lat:.4f}, {lon:.4f}"
+                    res = {
+                        "name": final_name,
+                        "lat": lat,
+                        "lon": lon,
+                        "full": f"{final_name}, {full}" if full and final_name not in full else (full or final_name)
+                    }
+                    _REVERSE_CACHE[cache_key] = res
+                    return res
+    except Exception:
+        pass
+
+    # 2. Secondary: Nominatim reverse
+    try:
+        async with httpx.AsyncClient(timeout=3.5) as client:
             resp = await client.get(
                 "https://nominatim.openstreetmap.org/reverse",
                 params={"lat": lat, "lon": lon, "format": "json", "accept-language": "en"},
-                headers={"User-Agent": "SmartTrafficBengaluruPilot/1.0"}
+                headers={"User-Agent": "SmartTrafficNavigationPlatform/2.0"}
             )
-            data = resp.json()
-            addr = data.get("address", {})
-            # Build a short human-readable name
-            parts = [
-                addr.get("road") or addr.get("pedestrian") or addr.get("footway"),
-                addr.get("suburb") or addr.get("neighbourhood"),
-                addr.get("city_district") or addr.get("city"),
-            ]
-            name = ", ".join(p for p in parts if p)
-            return {
-                "name": name or data.get("display_name", f"{lat:.4f}, {lon:.4f}"),
-                "lat": lat, "lon": lon,
-                "full": data.get("display_name", "")
-            }
+            if resp.status_code == 200:
+                data = resp.json()
+                addr = data.get("address", {})
+                parts = [
+                    addr.get("road") or addr.get("pedestrian") or addr.get("footway"),
+                    addr.get("suburb") or addr.get("neighbourhood"),
+                    addr.get("city_district") or addr.get("city"),
+                ]
+                name = ", ".join(p for p in parts if p)
+                res = {
+                    "name": name or data.get("display_name", f"{lat:.4f}, {lon:.4f}"),
+                    "lat": lat, "lon": lon,
+                    "full": data.get("display_name", "")
+                }
+                _REVERSE_CACHE[cache_key] = res
+                return res
     except Exception:
-        return {"name": f"{lat:.4f}, {lon:.4f}", "lat": lat, "lon": lon, "full": ""}
+        pass
+
+    fallback_res = {"name": f"{lat:.4f}, {lon:.4f}", "lat": lat, "lon": lon, "full": ""}
+    _REVERSE_CACHE[cache_key] = fallback_res
+    return fallback_res
 
 # ─────────────────────────────────────────────────────
 #  AI ROUTE INSIGHT  —  Gemini or smart fallback

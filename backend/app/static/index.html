@@ -3,9 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Smart Traffic · Bengaluru</title>
+  <title>Smart Traffic · Real-Time GPS & Navigation</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -47,6 +49,56 @@
           <line x1="19" y1="12" x2="23" y2="12"/>
         </svg>
       </button>
+
+      <!-- Floating Map Layer Switcher (Google Maps style) -->
+      <button class="fab-layer" id="fabMapLayers" title="Map types & layers" aria-label="Map Layers">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+      </button>
+
+      <!-- Map Layer Selector Modal / Card -->
+      <div class="layer-selector-card" id="layerSelectorCard" style="display:none">
+        <div class="layer-card-header">
+          <div class="layer-card-title">
+            <span class="layer-title-icon">🗺️</span>
+            <span>Map Types & 3D</span>
+          </div>
+          <button class="layer-close-btn" id="btnCloseLayerCard">✕</button>
+        </div>
+        <div class="layer-grid">
+          <button class="layer-card-btn active" data-layer="voyager">
+            <div class="layer-thumb thumb-voyager"></div>
+            <span class="layer-lbl">Default</span>
+          </button>
+          <button class="layer-card-btn" data-layer="satellite">
+            <div class="layer-thumb thumb-satellite"></div>
+            <span class="layer-lbl">Satellite HD</span>
+          </button>
+          <button class="layer-card-btn" data-layer="terrain">
+            <div class="layer-thumb thumb-terrain"></div>
+            <span class="layer-lbl">Terrain 3D</span>
+          </button>
+          <button class="layer-card-btn" data-layer="dark">
+            <div class="layer-thumb thumb-dark"></div>
+            <span class="layer-lbl">Night Drive</span>
+          </button>
+        </div>
+        <div class="layer-features">
+          <label class="layer-feature-toggle">
+            <span class="layer-feature-name">🚦 Real-Time Traffic Flow</span>
+            <input type="checkbox" id="toggleTrafficLayer" checked class="toggle-input" />
+            <span class="toggle-track"></span>
+          </label>
+          <label class="layer-feature-toggle">
+            <span class="layer-feature-name">🏢 3D Building Relief</span>
+            <input type="checkbox" id="toggle3DBuildings" checked class="toggle-input" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
 
       <!-- Floating AI insight bar over map -->
       <div class="ai-bar" id="aiBar" style="display:none">
@@ -115,7 +167,7 @@
 
         <!-- Quick Locations -->
         <div class="quick-places">
-          <p class="quick-label">Popular in Bengaluru Pilot Area</p>
+          <p class="quick-label">⚡ Quick Destinations & Major Hubs</p>
           <div class="quick-chips" id="quickChips"></div>
         </div>
 

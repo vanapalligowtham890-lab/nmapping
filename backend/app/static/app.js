@@ -36,43 +36,170 @@ const state = {
   cachedSegments: [],
 };
 
-// Rich presets for Bengaluru and India
+// Rich nationwide presets & smart suggestions
 const POPULAR_HUBS = [
   { name: '📍 My Current Location (GPS)', isCurrentLoc: true, type: 'place', display: 'Use device GPS sensor or network location' },
+  { name: 'Kakinada Town Junction', lat: 16.9673, lon: 82.2335, type: 'transit', display: 'Railway Station Road, Kakinada, Andhra Pradesh' },
+  { name: 'Kakinada Beach Road', lat: 16.9891, lon: 82.2475, type: 'landmark', display: 'NTR Beach Road, Kakinada, Andhra Pradesh' },
+  { name: 'Rajahmundry Central', lat: 17.0005, lon: 81.8040, type: 'city', display: 'Godavari Riverfront, East Godavari, Andhra Pradesh' },
+  { name: 'Vijayawada Junction', lat: 16.5186, lon: 80.6195, type: 'transit', display: 'Vijayawada Railway Station, Andhra Pradesh' },
+  { name: 'Hyderabad Hitec City', lat: 17.4474, lon: 78.3762, type: 'area', display: 'Cyber Towers, Hitec City, Hyderabad, Telangana' },
   { name: 'Indiranagar 100 Feet Road', lat: 12.9750, lon: 77.6407, type: 'road', display: '100 Feet Road, Indiranagar, Bengaluru, Karnataka' },
   { name: 'Domlur Flyover', lat: 12.9610, lon: 77.6385, type: 'landmark', display: 'Domlur Flyover, Old Airport Road, Bengaluru' },
   { name: 'Sony World Junction', lat: 12.9352, lon: 77.6245, type: 'junction', display: 'Sony World, 80ft Road, Koramangala, Bengaluru' },
   { name: 'Kempegowda International Airport (BLR)', lat: 13.1986, lon: 77.7066, type: 'transit', display: 'BLR Airport, Devanahalli, Bengaluru, Karnataka' },
   { name: 'Whitefield ITPL', lat: 12.9863, lon: 77.7381, type: 'area', display: 'International Tech Park, Whitefield, Bengaluru' },
   { name: 'MG Road Metro Station', lat: 12.9756, lon: 77.6066, type: 'transit', display: 'Mahatma Gandhi Road, Bengaluru Central' },
-  { name: 'Solapur', lat: 17.6599, lon: 75.9064, type: 'place', display: 'Solapur, Maharashtra, India' },
-  { name: 'Mysuru (Mysore)', lat: 12.2958, lon: 76.6394, type: 'place', display: 'Mysuru, Karnataka, India' },
+  { name: 'Mysuru Palace', lat: 12.3052, lon: 76.6552, type: 'landmark', display: 'Sayyaji Rao Road, Mysuru, Karnataka' },
+  { name: 'Solapur Junction', lat: 17.6599, lon: 75.9064, type: 'city', display: 'Solapur, Maharashtra, India' },
 ];
 
 const TYPE_ICONS = {
-  junction: '🔀', road: '🛣️', landmark: '🌉', area: '📍', transit: '🚉', place: '🏙️', city: '🏙️'
+  junction: '🔀', road: '🛣️', landmark: '🏛️', area: '📍', transit: '🚆',
+  place: '🏙️', city: '🏙️', airport: '✈️', hospital: '🏥', mall: '🛍️'
 };
 
 const MANEUVER_ICONS = {
-  left: '↰',
-  right: '↱',
-  'slight left': '↖',
-  'slight right': '↗',
-  'sharp left': '⬅',
-  'sharp right': '➡',
-  straight: '⬆',
-  uturn: '↩',
-  roundabout: '🔄',
-  depart: '🚀',
-  arrive: '🏁',
-  continue: '⬆',
+  left: '↰', right: '↱', 'slight left': '↖', 'slight right': '↗',
+  'sharp left': '⬅', 'sharp right': '➡', straight: '⬆', uturn: '↩',
+  roundabout: '🔄', depart: '🚀', arrive: '🏁', continue: '⬆',
 };
+
+// ──────────────────────────────────────────────
+//  MULTI-TYPE MAP PROVIDERS & 3D RELIEF
+// ──────────────────────────────────────────────
+const TILE_PROVIDERS = {
+  voyager: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20,
+    subdomains: 'abcd',
+    attribution: '© CARTO, © OpenStreetMap'
+  }),
+  satellite: L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: '© Esri, Maxar, Earthstar Geographics'
+    }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      opacity: 0.9
+    }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      opacity: 0.95
+    })
+  ]),
+  terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    maxZoom: 17,
+    subdomains: 'abc',
+    attribution: '© OpenTopoMap, © OpenStreetMap'
+  }),
+  dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20,
+    subdomains: 'abcd',
+    attribution: '© CARTO, © OpenStreetMap'
+  })
+};
+
+let currentTileLayer = null;
+let currentLayerKey = 'voyager';
+let showTrafficOverlay = true;
+let show3DBuildings = true;
+
+function switchBaseLayer(layerKey) {
+  if (!TILE_PROVIDERS[layerKey] || !state.map) return;
+
+  if (currentTileLayer) {
+    state.map.removeLayer(currentTileLayer);
+  }
+
+  currentTileLayer = TILE_PROVIDERS[layerKey];
+  currentTileLayer.addTo(state.map);
+  if (currentTileLayer.bringToBack) {
+    currentTileLayer.bringToBack();
+  }
+
+  currentLayerKey = layerKey;
+  try { localStorage.setItem('smart_traffic_map_layer', layerKey); } catch (e) {}
+
+  document.querySelectorAll('.layer-card-btn').forEach(btn => {
+    if (btn.dataset.layer === layerKey) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+
+  const names = { voyager: 'Default Streets', satellite: 'Satellite HD', terrain: 'Terrain 3D', dark: 'Night Drive' };
+  showToast(`🗺️ Map switched to ${names[layerKey] || layerKey}`, 'info');
+}
+
+function initMapLayerSwitcher() {
+  const fabLayers = document.getElementById('fabMapLayers');
+  const layerCard = document.getElementById('layerSelectorCard');
+  const btnClose = document.getElementById('btnCloseLayerCard');
+  const toggleTraffic = document.getElementById('toggleTrafficLayer');
+  const toggle3D = document.getElementById('toggle3DBuildings');
+
+  if (!fabLayers || !layerCard) return;
+
+  fabLayers.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = layerCard.style.display !== 'none';
+    layerCard.style.display = isVisible ? 'none' : 'block';
+    fabLayers.classList.toggle('active', !isVisible);
+  });
+
+  if (btnClose) {
+    btnClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      layerCard.style.display = 'none';
+      fabLayers.classList.remove('active');
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!layerCard.contains(e.target) && !fabLayers.contains(e.target)) {
+      layerCard.style.display = 'none';
+      fabLayers.classList.remove('active');
+    }
+  });
+
+  document.querySelectorAll('.layer-card-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchBaseLayer(btn.dataset.layer);
+    });
+  });
+
+  if (toggleTraffic) {
+    toggleTraffic.addEventListener('change', () => {
+      showTrafficOverlay = toggleTraffic.checked;
+      Object.values(state.segmentLayers).forEach(layer => {
+        if (showTrafficOverlay) layer.addTo(state.map);
+        else state.map.removeLayer(layer);
+      });
+      state.routeLayers.forEach(l => {
+        if (showTrafficOverlay) l.addTo(state.map);
+        else state.map.removeLayer(l);
+      });
+      showToast(showTrafficOverlay ? '🚦 Real-time traffic overlay active' : 'Traffic overlay hidden', 'info');
+    });
+  }
+
+  if (toggle3D) {
+    toggle3D.addEventListener('change', () => {
+      show3DBuildings = toggle3D.checked;
+      showToast(show3DBuildings ? '🏢 3D terrain & relief active' : '3D relief disabled', 'info');
+    });
+  }
+
+  const saved = localStorage.getItem('smart_traffic_map_layer') || 'voyager';
+  switchBaseLayer(saved);
+}
 
 // ──────────────────────────────────────────────
 //  BOOT
 // ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
+  initMapLayerSwitcher();
   initSearchFields();
   initVehicleSelector();
   initBottomSheet();
@@ -102,11 +229,10 @@ function initMap() {
     attributionControl: true
   }).setView([12.9610, 77.6385], 13);
 
-  // High-contrast clean map tiles
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(state.map);
+  // Initialize selected layer
+  const saved = localStorage.getItem('smart_traffic_map_layer') || 'voyager';
+  currentTileLayer = TILE_PROVIDERS[saved] || TILE_PROVIDERS.voyager;
+  currentTileLayer.addTo(state.map);
 
   L.control.zoom({ position: 'topright' }).addTo(state.map);
 
@@ -447,14 +573,34 @@ function setupSearchField(inputId, dropdownId, clearId, onSelect) {
   }
 }
 
+function calcDistanceKm(lat1, lon1, lat2, lon2) {
+  if (lat1 === null || lat1 === undefined || lon1 === null || lon1 === undefined) return null;
+  if (lat2 === null || lat2 === undefined || lon2 === null || lon2 === undefined) return null;
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return Math.round(R * c);
+}
+
 async function searchPlaces(q, dropdown, input, onSelect) {
   if (!q || q.length < 2) {
     renderDropdown(POPULAR_HUBS, dropdown, input, onSelect);
     return;
   }
 
+  const userLat = state.origin?.lat;
+  const userLon = state.origin?.lon;
+  let url = `/v1/ai/places/search?q=${encodeURIComponent(q)}&limit=10`;
+  if (userLat && userLon) {
+    url += `&lat=${userLat.toFixed(4)}&lon=${userLon.toFixed(4)}`;
+  }
+
   try {
-    const res = await fetch(`/v1/ai/places/search?q=${encodeURIComponent(q)}`);
+    const res = await fetch(url);
     const places = await res.json();
     renderDropdown(places, dropdown, input, onSelect);
   } catch (err) {
@@ -469,15 +615,31 @@ function renderDropdown(places, dropdown, input, onSelect) {
     return;
   }
 
-  dropdown.innerHTML = places.map((p, i) => `
-    <div class="dropdown-item" data-idx="${i}">
-      <span class="dropdown-item-icon">${p.isCurrentLoc ? '📍' : (TYPE_ICONS[p.type] || '📍')}</span>
-      <div class="dropdown-item-text">
-        <div class="dropdown-item-name">${p.name}</div>
-        <div class="dropdown-item-type">${p.display || p.type}</div>
+  const userLat = state.origin?.lat;
+  const userLon = state.origin?.lon;
+
+  dropdown.innerHTML = places.map((p, i) => {
+    const icon = p.isCurrentLoc ? '📍' : (TYPE_ICONS[p.type] || '📍');
+    let distBadge = '';
+    if (userLat && userLon && p.lat && p.lon && !p.isCurrentLoc) {
+      const d = calcDistanceKm(userLat, userLon, p.lat, p.lon);
+      if (d !== null) {
+        distBadge = `<span class="drop-dist">${d < 1 ? '<1 km' : d + ' km'}</span>`;
+      }
+    }
+    return `
+      <div class="dropdown-item" data-idx="${i}">
+        <div class="drop-icon-box">${icon}</div>
+        <div class="drop-content">
+          <div class="drop-header">
+            <span class="drop-name">${p.name}</span>
+            ${distBadge}
+          </div>
+          <div class="drop-sub">${p.display || p.type}</div>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
   dropdown.classList.add('open');
 
   dropdown.querySelectorAll('.dropdown-item').forEach((el, i) => {
@@ -848,24 +1010,26 @@ function selectRoute(route, data) {
 function drawActiveTrafficRoute(route) {
   if (!route || !route.coordinates || route.coordinates.length < 2) return;
 
-  // Layer 1: Sleek Casing / Border (Google Maps style dark/white outline)
+  // Layer 1: Sleek Casing / Border (Google Maps style dark outline with Tegaki animated draw-in)
   const casingPoly = L.polyline(route.coordinates, {
     color: '#0d47a1',
     weight: 9,
-    opacity: 0.8,
+    opacity: 0.85,
+    className: 'anim-draw-path',
     lineCap: 'round',
     lineJoin: 'round'
   }).addTo(state.map);
   state.routeLayers.push(casingPoly);
 
-  // Layer 2: Multi-color traffic segments (Green, Yellow, Red)
+  // Layer 2: Multi-color traffic segments (Green, Yellow, Red) with Tegaki draw-in
   if (route.traffic_segments && route.traffic_segments.length > 0) {
     route.traffic_segments.forEach(ts => {
       if (ts.coordinates && ts.coordinates.length > 1) {
         const segPoly = L.polyline(ts.coordinates, {
           color: ts.color || '#1E8E3E',
           weight: 5.5,
-          opacity: 0.96,
+          opacity: 0.98,
+          className: 'anim-draw-path',
           lineCap: 'round',
           lineJoin: 'round'
         }).addTo(state.map);
@@ -877,12 +1041,25 @@ function drawActiveTrafficRoute(route) {
     const mainPoly = L.polyline(route.coordinates, {
       color: '#1A73E8',
       weight: 5.5,
-      opacity: 0.95,
+      opacity: 0.96,
+      className: 'anim-draw-path',
       lineCap: 'round',
       lineJoin: 'round'
     }).addTo(state.map);
     state.routeLayers.push(mainPoly);
   }
+
+  // Layer 3: Directional Flow Pulse (animated flowing traffic dashes along road curves)
+  const flowPoly = L.polyline(route.coordinates, {
+    color: '#ffffff',
+    weight: 2.5,
+    opacity: 0.85,
+    dashArray: '10, 24',
+    className: 'traffic-flowing-dash',
+    lineCap: 'round',
+    lineJoin: 'round'
+  }).addTo(state.map);
+  state.routeLayers.push(flowPoly);
 
   // Smoothly fit bounds to show the entire road trip
   state.map.fitBounds(casingPoly.getBounds(), { padding: [60, 60] });
@@ -916,7 +1093,12 @@ async function fetchAIInsight() {
     const insight = await res.json();
 
     if (dots) dots.style.display = 'none';
-    if (summary) summary.textContent = insight.summary;
+    if (summary) {
+      summary.textContent = insight.summary;
+      summary.classList.remove('tegaki-text-reveal');
+      void summary.offsetWidth;
+      summary.classList.add('tegaki-text-reveal');
+    }
 
     document.getElementById('aiSafetyScore').textContent = insight.safety_score;
     document.getElementById('aiEta').textContent = insight.estimated_eta;
