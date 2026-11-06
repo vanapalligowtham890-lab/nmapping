@@ -113,16 +113,18 @@
           </label>
         </div>
 
-        <!-- CTA -->
-        <button class="cta-btn" id="btnFindRoutes">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          Find Best Routes
-        </button>
-
         <!-- Quick Locations -->
         <div class="quick-places">
           <p class="quick-label">Popular in Bengaluru Pilot Area</p>
           <div class="quick-chips" id="quickChips"></div>
+        </div>
+
+        <!-- Sticky CTA: Find Best Routes -->
+        <div class="sticky-cta-wrap">
+          <button class="cta-btn" id="btnFindRoutes">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            Find Best Routes
+          </button>
         </div>
       </div>
 
@@ -173,11 +175,13 @@
         <!-- Route Cards -->
         <div id="routeCards" class="route-cards-list"></div>
 
-        <!-- Start Trip -->
-        <button class="cta-btn cta-green" id="btnStartTrip" style="display:none">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-          Start Trip — Activate Location
-        </button>
+        <!-- Sticky CTA: Start Trip -->
+        <div class="sticky-cta-wrap" id="wrapStartTrip" style="display:none">
+          <button class="cta-btn cta-green" id="btnStartTrip">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            Start Trip — Live GPS Navigation
+          </button>
+        </div>
       </div>
 
       <!-- ACTIVE TRIP PANEL -->
@@ -194,12 +198,18 @@
 
         <!-- Current Instruction -->
         <div class="nav-instruction" id="navInstruction">
-          <div class="nav-arrow">➔</div>
+          <div class="nav-arrow" id="navArrow">➔</div>
           <div class="nav-text">
             <p class="nav-primary" id="navPrimary">Follow the route</p>
             <p class="nav-secondary" id="navSecondary">on 100 Feet Road</p>
           </div>
           <div class="nav-dist" id="navDist">—</div>
+        </div>
+
+        <!-- Next Maneuver Preview -->
+        <div class="nav-next-step" id="navNextStep" style="display:none">
+          <span class="nav-next-icon">↳</span>
+          <span class="nav-next-text" id="navNextText">Then proceed straight</span>
         </div>
 
         <!-- Trip Stats Row -->
@@ -223,16 +233,18 @@
           </div>
         </div>
 
-        <!-- Trip Actions -->
-        <div class="trip-actions">
-          <button class="trip-btn-secondary" id="btnReportIssue">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
-            Report
-          </button>
-          <button class="trip-btn-end" id="btnEndTrip">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-            End Trip
-          </button>
+        <!-- Sticky Trip Actions -->
+        <div class="sticky-cta-wrap">
+          <div class="trip-actions">
+            <button class="trip-btn-secondary" id="btnReportIssue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+              Report
+            </button>
+            <button class="trip-btn-end" id="btnEndTrip">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              End Trip
+            </button>
+          </div>
         </div>
       </div>
 

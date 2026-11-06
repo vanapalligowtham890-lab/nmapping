@@ -789,8 +789,13 @@ function renderRoutes(data) {
 
   // Show Start Trip button
   const startBtn = document.getElementById('btnStartTrip');
+  const wrapStart = document.getElementById('wrapStartTrip');
+  const hasRec = data.routes.some(r => r.is_recommended);
+  if (wrapStart) {
+    wrapStart.style.display = hasRec ? 'block' : 'none';
+  }
   if (startBtn) {
-    startBtn.style.display = data.routes.some(r => r.is_recommended) ? '' : 'none';
+    startBtn.style.display = hasRec ? 'flex' : 'none';
   }
 
   // Floating AI Summary Bar
@@ -1325,12 +1330,33 @@ function showPanel(panelId) {
     if (id === panelId) el.classList.remove('hidden');
     else el.classList.add('hidden');
   });
+
+  const sheet = document.getElementById('bottomSheet');
+  if (!sheet) return;
+
+  if (window.innerWidth < 768) {
+    if (panelId === 'panelSearch') {
+      sheet.style.maxHeight = 'min(450px, 70vh)';
+    } else if (panelId === 'panelRoutes') {
+      sheet.style.maxHeight = 'min(540px, 78vh)';
+      const wrap = document.getElementById('wrapStartTrip');
+      if (wrap) wrap.style.display = state.allRoutes.some(r => r.is_recommended) ? 'block' : 'none';
+    } else if (panelId === 'panelTrip') {
+      sheet.style.maxHeight = 'min(360px, 52vh)';
+    }
+  } else {
+    sheet.style.maxHeight = '';
+  }
 }
 
 function initBottomSheet() {
   const sheet = document.getElementById('bottomSheet');
   const handle = document.getElementById('sheetHandle');
   if (!sheet || !handle) return;
+
+  if (window.innerWidth < 768) {
+    sheet.style.maxHeight = 'min(450px, 70vh)';
+  }
 
   let startY = 0, startH = 0, dragging = false;
   const getH = () => sheet.getBoundingClientRect().height;
@@ -1346,7 +1372,7 @@ function initBottomSheet() {
     if (!dragging) return;
     dragging = false;
     const h = getH();
-    const h1 = 90, h2 = 320, h3 = window.innerHeight * 0.85;
+    const h1 = 100, h2 = Math.min(450, window.innerHeight * 0.7), h3 = window.innerHeight * 0.88;
     const snap = [h1, h2, h3].reduce((a, b) => Math.abs(b - h) < Math.abs(a - h) ? b : a);
     sheet.style.transition = 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
     sheet.style.maxHeight = snap + 'px';
