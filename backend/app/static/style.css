@@ -1467,7 +1467,36 @@ html, body {
   font-family: var(--font);
 }
 
-/* ==================== LEAFLET OVERRIDES ==================== */
+/* ==================== LEAFLET OVERRIDES & ULTRA-SMOOTH GPU ZOOM ==================== */
+.leaflet-container {
+  background: #eaecee !important;
+  font-family: var(--font) !important;
+  outline: none;
+}
+body.dark-mode .leaflet-container {
+  background: #14171a !important;
+}
+
+/* Eliminate white screen flashing and square block tearing during zoom */
+.leaflet-tile {
+  will-change: transform, opacity;
+  transition: opacity 0.2s cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.leaflet-tile-loaded {
+  opacity: 1 !important;
+}
+
+/* Hardware-accelerated tile container */
+.leaflet-tile-container {
+  will-change: transform;
+}
+
+/* Smooth zoom transition without jitter */
+.leaflet-zoom-anim .leaflet-zoom-animated {
+  will-change: transform;
+}
+
 .leaflet-control-attribution { font-size: 10px !important; }
 .leaflet-control-zoom { margin: 10px !important; }
 .leaflet-control-zoom a {
@@ -1477,6 +1506,10 @@ html, body {
   font-size: 18px !important;
   border-radius: 50% !important;
   box-shadow: var(--shadow-sm) !important;
+  transition: transform 0.15s ease, background 0.15s ease !important;
+}
+.leaflet-control-zoom a:hover {
+  transform: scale(1.08) !important;
 }
 
 /* ==================== SKELETON LOADER ==================== */

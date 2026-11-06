@@ -70,30 +70,44 @@ const MANEUVER_ICONS = {
 //  MULTI-TYPE MAP PROVIDERS & 3D RELIEF
 //  Ultra High-Res Max Zoom (Doorstep Level) — Zero Watermarks, No Missing Tiles
 // ──────────────────────────────────────────────
+const SMOOTH_TILE_OPTIONS = {
+  keepBuffer: 16,               // Cache 16 surrounding tiles across zoom levels — NO white screen!
+  updateWhenIdle: false,        // Fetch progressively during pan/zoom
+  updateWhenZooming: false,     // Keeps existing tiles scaled until zoom finishes — NO block tearing!
+  updateInterval: 60,           // Throttle rapid tile requests
+  crossOrigin: true
+};
+
 const TILE_PROVIDERS = {
-  voyager: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  voyager: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    ...SMOOTH_TILE_OPTIONS,
+    subdomains: ['a', 'b', 'c'],
     maxNativeZoom: 19,
     maxZoom: 20,
     attribution: '© OpenStreetMap contributors'
   }),
   satellite: L.layerGroup([
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      ...SMOOTH_TILE_OPTIONS,
       maxNativeZoom: 18,
       maxZoom: 20,
       attribution: '© Esri, Maxar, Earthstar Geographics'
     }),
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+      ...SMOOTH_TILE_OPTIONS,
       maxNativeZoom: 18,
       maxZoom: 20,
       opacity: 0.95
     }),
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+      ...SMOOTH_TILE_OPTIONS,
       maxNativeZoom: 18,
       maxZoom: 20,
       opacity: 0.95
     })
   ]),
   terrain: L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    ...SMOOTH_TILE_OPTIONS,
     subdomains: ['a', 'b', 'c'],
     maxNativeZoom: 18,
     maxZoom: 20,
@@ -101,12 +115,14 @@ const TILE_PROVIDERS = {
   }),
   dark: L.layerGroup([
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-      maxNativeZoom: 15,
+      ...SMOOTH_TILE_OPTIONS,
+      maxNativeZoom: 16,
       maxZoom: 20,
       attribution: '© Esri, HERE, Garmin, OpenStreetMap'
     }),
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
-      maxNativeZoom: 15,
+      ...SMOOTH_TILE_OPTIONS,
+      maxNativeZoom: 16,
       maxZoom: 20,
       opacity: 0.95
     })
@@ -115,7 +131,7 @@ const TILE_PROVIDERS = {
 
 let currentTileLayer = null;
 let currentLayerKey = 'voyager';
-let showTrafficOverlay = true;
+let showTrafficOverlay = false;
 let show3DBuildings = true;
 
 function switchBaseLayer(layerKey) {
@@ -129,6 +145,10 @@ function switchBaseLayer(layerKey) {
   currentTileLayer.addTo(state.map);
   if (currentTileLayer.bringToBack) {
     currentTileLayer.bringToBack();
+  } else if (currentTileLayer.eachLayer) {
+    currentTileLayer.eachLayer(layer => {
+      if (layer.bringToBack) layer.bringToBack();
+    });
   }
 
   currentLayerKey = layerKey;
@@ -188,10 +208,10 @@ function initMapLayerSwitcher() {
         if (showTrafficOverlay) layer.addTo(state.map);
         else state.map.removeLayer(layer);
       });
-      state.routeLayers.forEach(l => {
-        if (showTrafficOverlay) l.addTo(state.map);
-        else state.map.removeLayer(l);
-      });
+      const legendEl = document.querySelector('.map-legend');
+      if (legendEl) {
+        legendEl.style.display = (showTrafficOverlay || state.routeLayers.length > 0) ? 'block' : 'none';
+      }
       showToast(showTrafficOverlay ? '🚦 Real-time traffic overlay active' : 'Traffic overlay hidden', 'info');
     });
   }
@@ -241,7 +261,18 @@ function initMap() {
     zoomControl: false,
     attributionControl: true,
     maxZoom: 20,
-    minZoom: 3
+    minZoom: 3,
+    zoomSnap: 0.25,
+    zoomDelta: 0.5,
+    wheelPxPerZoomLevel: 100,
+    wheelDebounceTime: 40,
+    zoomAnimation: true,
+    zoomAnimationThreshold: 8,
+    fadeAnimation: true,
+    markerZoomAnimation: true,
+    inertia: true,
+    inertiaDeceleration: 2500,
+    easeLinearity: 0.25
   }).setView([12.9610, 77.6385], 13);
 
   // Initialize selected layer
@@ -251,10 +282,11 @@ function initMap() {
 
   L.control.zoom({ position: 'topright' }).addTo(state.map);
 
-  // Map Legend
+  // Map Legend (hidden by default unless traffic layer or route active)
   const legend = L.control({ position: 'bottomright' });
   legend.onAdd = () => {
     const div = L.DomUtil.create('div', 'map-legend');
+    div.style.display = 'none';
     div.innerHTML = `
       <div class="legend-row"><div class="legend-dot" style="background:#1e8e3e"></div>Fast Flow</div>
       <div class="legend-row"><div class="legend-dot" style="background:#f9ab00"></div>Slowdown</div>
@@ -899,10 +931,16 @@ function clearRouteLayers() {
   state.routeLayers = [];
   state.altRouteLayers.forEach(l => state.map.removeLayer(l));
   state.altRouteLayers = [];
+  const legendEl = document.querySelector('.map-legend');
+  if (legendEl) {
+    legendEl.style.display = showTrafficOverlay ? 'block' : 'none';
+  }
 }
 
 function renderRoutes(data) {
   clearRouteLayers();
+  const legendEl = document.querySelector('.map-legend');
+  if (legendEl) legendEl.style.display = 'block';
 
   state.activeRoute = data.routes.find(r => r.route_id === data.selected_route_id) || data.routes[0];
   const container = document.getElementById('routeCards');
@@ -1450,10 +1488,18 @@ function renderSegments(segs) {
       const poly = state.segmentLayers[seg.segment_id];
       poly.setStyle(style);
       poly.setPopupContent(popupHtml);
+      if (showTrafficOverlay && !state.map.hasLayer(poly)) {
+        poly.addTo(state.map);
+      } else if (!showTrafficOverlay && state.map.hasLayer(poly)) {
+        state.map.removeLayer(poly);
+      }
     } else {
-      const poly = L.polyline(seg.coordinates, style).addTo(state.map);
+      const poly = L.polyline(seg.coordinates, style);
       poly.bindPopup(popupHtml, { maxWidth: 220 });
       state.segmentLayers[seg.segment_id] = poly;
+      if (showTrafficOverlay) {
+        poly.addTo(state.map);
+      }
     }
   });
 }
