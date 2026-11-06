@@ -67,12 +67,12 @@ const MANEUVER_ICONS = {
 
 // ──────────────────────────────────────────────
 //  MULTI-TYPE MAP PROVIDERS & 3D RELIEF
+//  100% Free Public GIS Tiles — Zero Watermarks, No API Key Required
 // ──────────────────────────────────────────────
 const TILE_PROVIDERS = {
-  voyager: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 20,
-    subdomains: 'abcd',
-    attribution: '© CARTO, © OpenStreetMap'
+  voyager: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: '© Esri, HERE, Garmin, USGS, OpenStreetMap'
   }),
   satellite: L.layerGroup([
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -88,16 +88,20 @@ const TILE_PROVIDERS = {
       opacity: 0.95
     })
   ]),
-  terrain: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-    maxZoom: 17,
-    subdomains: 'abc',
-    attribution: '© OpenTopoMap, © OpenStreetMap'
+  terrain: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: '© Esri, Intermap, USGS, OpenStreetMap'
   }),
-  dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 20,
-    subdomains: 'abcd',
-    attribution: '© CARTO, © OpenStreetMap'
-  })
+  dark: L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 16,
+      attribution: '© Esri, HERE, Garmin, OpenStreetMap'
+    }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 16,
+      opacity: 0.9
+    })
+  ])
 };
 
 let currentTileLayer = null;
