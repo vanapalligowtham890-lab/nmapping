@@ -448,36 +448,31 @@ async function acquireUserLocation(centerMap = true) {
   const fab = document.getElementById('fabMyLocation');
   if (fab) fab.classList.add('locating');
 
-  showToast('📡 Acquiring high-precision GPS coordinates…', 'info');
-
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => handleGpsSuccess(pos, centerMap),
-      (err) => {
-        console.warn('Browser GPS failed, falling back to IP geolocation:', err);
-        fallbackIpLocation(centerMap);
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-    );
-  } else {
-    fallbackIpLocation(centerMap);
+  if (!navigator.geolocation) {
+    if (fab) fab.classList.remove('locating');
+    showToast('❌ Location access is not supported by your browser', 'error');
+    return;
   }
-}
 
-async function fallbackIpLocation(centerMap) {
-  try {
-    const res = await fetch('https://ipapi.co/json/');
-    const data = await res.json();
-    if (data.latitude && data.longitude) {
-      handleCoordinatesAcquired(data.latitude, data.longitude, 500, `${data.city || 'Your Area'}, ${data.region || ''}`, centerMap);
-      showToast(`📍 Located via Network: ${data.city || 'Your Location'}`, 'info');
-      return;
-    }
-  } catch (e) {}
+  showToast('📡 Requesting high-precision GPS coordinates…', 'info');
 
-  // Default to Bengaluru center if all location lookups blocked
-  handleCoordinatesAcquired(12.9716, 77.5946, 50, 'Bengaluru, Karnataka', centerMap);
-  showToast('📍 Set to Bengaluru. Drag the green marker or tap the map to fine-tune.', 'warning');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => handleGpsSuccess(pos, centerMap),
+    (err) => {
+      if (fab) fab.classList.remove('locating');
+      console.warn('Geolocation error:', err);
+      if (err.code === err.PERMISSION_DENIED) {
+        showToast('⚠️ Location access is not enabled. Please allow location permissions in your browser to use GPS.', 'error');
+      } else if (err.code === err.POSITION_UNAVAILABLE) {
+        showToast('⚠️ Location signal unavailable. Please ensure GPS / Location is turned on in your device settings.', 'warning');
+      } else if (err.code === err.TIMEOUT) {
+        showToast('⚠️ Location request timed out. Please try again with GPS enabled.', 'warning');
+      } else {
+        showToast('⚠️ Could not determine your location. Please enable location access.', 'warning');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  );
 }
 
 async function handleGpsSuccess(pos, centerMap) {
@@ -1186,37 +1181,69 @@ async function fetchAIInsight() {
 // ──────────────────────────────────────────────
 async function doStartTrip() {
   const btn = document.getElementById('btnStartTrip');
-  btn.textContent = 'Starting…';
+
+  if (!navigator.geolocation) {
+    showToast('❌ Location access is not supported by your browser', 'error');
+    return;
+  }
+
+  btn.textContent = 'Checking Location Access…';
   btn.disabled = true;
 
-  try {
-    const res = await fetch('/v1/trips/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vehicle_profile: state.vehicle })
-    });
-    const data = await res.json();
-    state.currentSessionToken = data.session_token;
-    state.tripStartTime = Date.now();
-    state.tripStepIndex = 0;
-    state.tripCoordIndex = 0;
+  // Navigation requires active Location Access from the user
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        const res = await fetch('/v1/trips/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vehicle_profile: state.vehicle })
+        });
+        const data = await res.json();
+        state.currentSessionToken = data.session_token;
+        state.tripStartTime = Date.now();
+        state.tripStepIndex = 0;
+        state.tripCoordIndex = 0;
 
-    showPanel('panelTrip');
+        showPanel('panelTrip');
 
-    // Update Turn-by-turn Navigation instructions
-    updateTurnByTurnHUD();
+        // Update Turn-by-turn Navigation instructions
+        updateTurnByTurnHUD();
 
-    // Start Real GPS watch
-    startActiveGpsNavigation();
+        // Start Real GPS watch
+        startActiveGpsNavigation();
 
-    showToast('🚀 Navigation active. Real-time GPS transmitting foreground speeds.', 'success');
+        // Immediately center and update user marker to real GPS location
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const acc = Math.round(pos.coords.accuracy || 12);
+        updateUserMarker(lat, lon, acc);
+        if (state.map) state.map.flyTo([lat, lon], 17);
 
-  } catch (err) {
-    showToast('Failed to start trip session', 'error');
-  } finally {
-    btn.textContent = 'Start Trip — Activate Location';
-    btn.disabled = false;
-  }
+        showToast('🚀 Navigation active. Live GPS transmitting foreground speeds.', 'success');
+
+      } catch (err) {
+        showToast('Failed to start trip session', 'error');
+      } finally {
+        btn.textContent = 'Start Trip — Activate Location';
+        btn.disabled = false;
+      }
+    },
+    (err) => {
+      btn.textContent = 'Start Trip — Activate Location';
+      btn.disabled = false;
+      if (err.code === err.PERMISSION_DENIED) {
+        showToast('⚠️ Location access is not enabled. Please allow location permissions in your browser to start navigation.', 'error');
+      } else if (err.code === err.POSITION_UNAVAILABLE) {
+        showToast('⚠️ Location signal unavailable. Please ensure GPS / Location is turned on in device settings.', 'warning');
+      } else if (err.code === err.TIMEOUT) {
+        showToast('⚠️ Location request timed out. Please ensure GPS has a clear signal.', 'warning');
+      } else {
+        showToast('⚠️ Location access is required to navigate. Please enable location permissions.', 'warning');
+      }
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+  );
 }
 
 function updateTurnByTurnHUD() {
