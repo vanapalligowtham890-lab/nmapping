@@ -218,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initBottomSheet();
   initDrawer();
   initSimulationButtons();
-  initQuickChips();
+  initRecentLocations();
   initLocationButtons();
 
   // Connect real-time WebSocket stream (primary data channel)
@@ -483,6 +483,14 @@ function handleCoordinatesAcquired(lat, lon, accuracy, addressName, centerMap) {
 
   setMarker('origin', lat, lon, `📍 ${addressName} (Drag to adjust)`, true);
 
+  saveRecentLocation({
+    name: addressName,
+    lat: lat,
+    lon: lon,
+    type: 'place',
+    display: addressName
+  });
+
   if (centerMap && state.map) {
     state.map.invalidateSize();
     state.map.flyTo([lat, lon], 15);
@@ -669,6 +677,7 @@ function renderDropdown(places, dropdown, input, onSelect) {
       input.value = place.name;
       dropdown.classList.remove('open');
       onSelect(place);
+      saveRecentLocation(place);
     });
   });
 }
@@ -688,6 +697,7 @@ window.setAsOrigin = function(lat, lon, name) {
   document.getElementById('originInput').value = name;
   document.getElementById('originClear').style.display = '';
   setMarker('origin', lat, lon, name, true);
+  saveRecentLocation({ name, lat, lon, type: 'place', display: name });
   if (state.dest) fitBothMarkers();
   tryAutoSearch();
 };
@@ -698,6 +708,7 @@ window.setAsDest = function(lat, lon, name) {
   document.getElementById('destInput').value = name;
   document.getElementById('destClear').style.display = '';
   setMarker('dest', lat, lon, name, false);
+  saveRecentLocation({ name, lat, lon, type: 'place', display: name });
   if (state.origin) fitBothMarkers();
   tryAutoSearch();
 };
@@ -1487,62 +1498,122 @@ async function pollTrafficSummary() {
 // ──────────────────────────────────────────────
 //  UI UTILITIES
 // ──────────────────────────────────────────────
-function initQuickChips() {
-  const container = document.getElementById('quickChips');
+// ──────────────────────────────────────────────
+//  RECENT LOCATIONS (GOOGLE MAPS STYLE)
+// ──────────────────────────────────────────────
+const DEFAULT_RECENTS = [
+  { name: 'Kakinada Town Junction', lat: 16.9673, lon: 82.2335, type: 'transit', display: 'Railway Station Road, Kakinada, Andhra Pradesh' },
+  { name: 'Indiranagar 100 Feet Road', lat: 12.9750, lon: 77.6407, type: 'road', display: '100 Feet Road, Indiranagar, Bengaluru' },
+  { name: 'Kempegowda International Airport (BLR)', lat: 13.1986, lon: 77.7066, type: 'transit', display: 'BLR Airport, Devanahalli, Bengaluru' },
+  { name: 'Rajahmundry Central', lat: 17.0005, lon: 81.8040, type: 'city', display: 'Godavari Riverfront, East Godavari, Andhra Pradesh' },
+];
+
+function getRecentLocations() {
+  try {
+    const raw = localStorage.getItem('smart_traffic_recent_places');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {}
+  return [...DEFAULT_RECENTS];
+}
+
+function saveRecentLocation(place) {
+  if (!place || !place.name || !place.lat || !place.lon) return;
+  try {
+    let recents = getRecentLocations().filter(r => r.name.toLowerCase() !== place.name.toLowerCase());
+    recents.unshift({
+      name: place.name,
+      lat: place.lat,
+      lon: place.lon,
+      type: place.type || 'place',
+      display: place.display || place.name
+    });
+    recents = recents.slice(0, 6);
+    localStorage.setItem('smart_traffic_recent_places', JSON.stringify(recents));
+    renderRecentList();
+  } catch (e) {}
+}
+
+function renderRecentList() {
+  const container = document.getElementById('recentList');
   if (!container) return;
-  container.innerHTML = '';
+  const recents = getRecentLocations();
 
-  POPULAR_HUBS.forEach(place => {
-    const chip = document.createElement('button');
-    const chipClass = place.isSampleRoute ? 'quick-chip chip-demo' :
-                      place.type === 'transit' ? 'quick-chip chip-transit' :
-                      place.type === 'landmark' ? 'quick-chip chip-landmark' :
-                      place.type === 'city' ? 'quick-chip chip-city' :
-                      place.type === 'area' ? 'quick-chip chip-area' : 'quick-chip chip-road';
-    chip.className = chipClass;
-    chip.innerHTML = `${place.isSampleRoute ? '⚡' : (place.isCurrentLoc ? '📍' : (TYPE_ICONS[place.type] || '📍'))} ${place.name.replace('📍 ', '').replace('⚡ ', '')}`;
+  if (!recents.length) {
+    container.innerHTML = '<div class="recent-empty">No recent locations yet</div>';
+    return;
+  }
 
-    chip.addEventListener('click', () => {
-      if (place.isSampleRoute) {
-        // Run full interactive demonstration
-        const originPoint = { name: 'Indiranagar 100 Feet Road', lat: 12.9750, lon: 77.6407 };
-        const destPoint = { name: 'Kempegowda International Airport (BLR)', lat: 13.1986, lon: 77.7066 };
-        state.origin = originPoint;
-        state.dest = destPoint;
-        document.getElementById('originInput').value = originPoint.name;
-        document.getElementById('destInput').value = destPoint.name;
-        document.getElementById('originClear').style.display = '';
-        document.getElementById('destClear').style.display = '';
-        setMarker('origin', originPoint.lat, originPoint.lon, originPoint.name, true);
-        setMarker('dest', destPoint.lat, destPoint.lon, destPoint.name, false);
-        fitBothMarkers();
-        showToast('🚀 Calculating live route with real road curves & animated drawing…', 'info');
-        setTimeout(() => doFindRoutes(false), 250);
-        return;
-      }
+  container.innerHTML = recents.map((place, idx) => {
+    const icon = TYPE_ICONS[place.type] || '📍';
+    return `
+      <div class="recent-item" data-idx="${idx}">
+        <div class="recent-icon-box">${icon}</div>
+        <div class="recent-details">
+          <div class="recent-name-row">
+            <span class="recent-name">${place.name}</span>
+            <button type="button" class="recent-remove-btn" data-del="${idx}" title="Remove from recent">✕</button>
+          </div>
+          <div class="recent-sub">${place.display || place.name}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
 
-      if (place.isCurrentLoc) {
-        acquireUserLocation(true);
-        return;
-      }
+  container.querySelectorAll('.recent-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.recent-remove-btn')) return;
+      const idx = parseInt(item.dataset.idx, 10);
+      const place = recents[idx];
+      if (!place) return;
 
       if (!state.origin) {
         state.origin = place;
         document.getElementById('originInput').value = place.name;
         document.getElementById('originClear').style.display = '';
         setMarker('origin', place.lat, place.lon, place.name, true);
-        state.map.flyTo([place.lat, place.lon], 14);
-      } else if (!state.dest) {
+        if (state.map) state.map.flyTo([place.lat, place.lon], 15);
+        document.getElementById('destInput')?.focus();
+        showToast(`📍 Start set: ${place.name}. Choose destination next!`, 'info');
+      } else if (state.origin.name === place.name || (Math.abs(state.origin.lat - place.lat) < 0.0001 && Math.abs(state.origin.lon - place.lon) < 0.0001)) {
+        showToast('⚠️ Destination cannot be the same as starting point', 'warning');
+      } else {
         state.dest = place;
         document.getElementById('destInput').value = place.name;
         document.getElementById('destClear').style.display = '';
         setMarker('dest', place.lat, place.lon, place.name, false);
         fitBothMarkers();
-        setTimeout(() => doFindRoutes(false), 350);
+        showToast(`🚀 Calculating route to ${place.name}…`, 'info');
+        setTimeout(() => doFindRoutes(false), 300);
       }
     });
-    container.appendChild(chip);
   });
+
+  container.querySelectorAll('.recent-remove-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.del, 10);
+      let updated = getRecentLocations();
+      updated.splice(idx, 1);
+      localStorage.setItem('smart_traffic_recent_places', JSON.stringify(updated));
+      renderRecentList();
+    });
+  });
+}
+
+function initRecentLocations() {
+  renderRecentList();
+
+  const clearBtn = document.getElementById('btnClearRecentHistory');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      localStorage.setItem('smart_traffic_recent_places', JSON.stringify([]));
+      renderRecentList();
+      showToast('🕒 Recent history cleared', 'info');
+    });
+  }
 }
 
 function initVehicleSelector() {

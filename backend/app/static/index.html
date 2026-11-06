@@ -165,10 +165,16 @@
           </label>
         </div>
 
-        <!-- Quick Locations -->
-        <div class="quick-places">
-          <p class="quick-label">⚡ Quick Destinations & Major Hubs</p>
-          <div class="quick-chips" id="quickChips"></div>
+        <!-- Recent Locations (Google Maps Style) -->
+        <div class="recent-locations-section" id="recentLocationsSection">
+          <div class="recent-header">
+            <div class="recent-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="recent-clock-svg"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>Recent Locations</span>
+            </div>
+            <button type="button" class="recent-clear-btn" id="btnClearRecentHistory">Clear</button>
+          </div>
+          <div class="recent-list" id="recentList"></div>
         </div>
 
         <!-- Sticky CTA: Find Best Routes -->
