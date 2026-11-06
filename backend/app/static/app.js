@@ -123,6 +123,13 @@ function initMap() {
   };
   legend.addTo(state.map);
 
+  // Trigger map tile recomputation on load and resize
+  setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 150);
+  setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 600);
+  window.addEventListener('resize', () => {
+    if (state.map) state.map.invalidateSize();
+  });
+
   // Click on map to set points
   state.map.on('click', handleMapClick);
 }
@@ -254,7 +261,13 @@ function initLocationButtons() {
     btnSearchGps.addEventListener('click', () => acquireUserLocation(true));
   }
   if (fabGps) {
-    fabGps.addEventListener('click', () => acquireUserLocation(true));
+    fabGps.addEventListener('click', () => {
+      if (state.origin && state.origin.lat && state.origin.lon && state.map) {
+        state.map.invalidateSize();
+        state.map.flyTo([state.origin.lat, state.origin.lon], 16);
+      }
+      acquireUserLocation(true);
+    });
   }
 }
 
@@ -330,6 +343,7 @@ function handleCoordinatesAcquired(lat, lon, accuracy, addressName, centerMap) {
   setMarker('origin', lat, lon, `📍 ${addressName} (Drag to adjust)`, true);
 
   if (centerMap && state.map) {
+    state.map.invalidateSize();
     state.map.flyTo([lat, lon], 15);
   }
 
@@ -1347,6 +1361,10 @@ function showPanel(panelId) {
   } else {
     sheet.style.maxHeight = '';
   }
+
+  setTimeout(() => {
+    if (state.map) state.map.invalidateSize();
+  }, 250);
 }
 
 function initBottomSheet() {
@@ -1376,7 +1394,10 @@ function initBottomSheet() {
     const snap = [h1, h2, h3].reduce((a, b) => Math.abs(b - h) < Math.abs(a - h) ? b : a);
     sheet.style.transition = 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
     sheet.style.maxHeight = snap + 'px';
-    setTimeout(() => { sheet.style.transition = ''; }, 300);
+    setTimeout(() => {
+      sheet.style.transition = '';
+      if (state.map) state.map.invalidateSize();
+    }, 320);
   }
 
   handle.addEventListener('touchstart', e => onStart(e.touches[0].clientY), { passive: true });

@@ -1169,36 +1169,57 @@ html, body {
 /* ==================== RESPONSIVE ADJUSTMENTS ==================== */
 @media (min-width: 768px) {
   .app-shell {
-    display: grid;
-    grid-template-rows: var(--top-bar) 1fr;
-    grid-template-columns: 420px 1fr;
-    height: 100%;
+    display: grid !important;
+    grid-template-rows: var(--top-bar) 1fr !important;
+    grid-template-columns: 420px 1fr !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    width: 100vw !important;
+    overflow: hidden !important;
   }
   .top-bar {
-    grid-column: 1 / -1;
-    display: flex;
+    grid-row: 1 !important;
+    grid-column: 1 / -1 !important;
+    display: flex !important;
+    height: var(--top-bar) !important;
+    z-index: 400 !important;
   }
   .bottom-sheet {
-    grid-column: 1;
-    width: 420px;
-    height: 100%;
+    grid-row: 2 !important;
+    grid-column: 1 !important;
+    width: 420px !important;
+    height: 100% !important;
     max-height: none !important;
-    border-radius: 0;
-    box-shadow: 4px 0 24px rgba(0,0,0,0.1);
-    overflow-y: auto;
+    border-radius: 0 !important;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.1) !important;
+    overflow-y: auto !important;
+    position: relative !important;
+    z-index: 100 !important;
   }
   .map-wrap {
-    grid-column: 2;
-    height: 100%;
+    grid-row: 2 !important;
+    grid-column: 2 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    min-width: 0 !important;
+    position: relative !important;
+    overflow: hidden !important;
+  }
+  #map {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
   }
   .fab-location {
-    top: auto;
-    bottom: 24px;
-    right: 20px;
+    top: auto !important;
+    bottom: 24px !important;
+    right: 20px !important;
   }
-  .sheet-handle { display: none; }
-  .sheet-panel { padding-top: 14px; max-height: none; }
-  .toast-container { bottom: 24px; }
+  .sheet-handle { display: none !important; }
+  .sheet-panel { padding-top: 14px !important; max-height: none !important; }
+  .toast-container { bottom: 24px !important; }
 }
 
 @media (max-width: 768px) {
